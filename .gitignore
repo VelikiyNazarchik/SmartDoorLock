@@ -1,0 +1,17 @@
+# Firmware build output
+firmware-stm32/*/build/
+firmware-stm32/*/Debug/
+firmware-stm32/*/Release/
+firmware-stm32/*/Tests/build/
+*.su
+
+# IDE / tools
+.vscode/
+.idea/
+.settings/
+*.launch
+__pycache__/
+
+# CubeMX backups
+*.ioc.bak
+**/MXTmpFiles/
