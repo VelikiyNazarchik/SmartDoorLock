@@ -53,7 +53,8 @@ docs/                     архітектура, стан-машина, роз�
 hardware/bom.md           компоненти
 firmware-stm32/SmartDoorLock/
 ├── SmartDoorLock.ioc     конфігурація CubeMX (96 МГц, SPI1/2, DMA, ADC, TIM3, IWDG, USB CDC, FreeRTOS)
-├── CMakeLists.txt        збірка (CubeMX CMake + наші App/ і BSP)
+├── .project, .cproject   проєкт STM32CubeIDE (App/ і BSP додані як source-папка та include-шляхи)
+├── STM32F411CEUX_FLASH.ld  лінкер-скрипт: Flash 384 КБ, сектор 7 — дані
 ├── Core/ USB_DEVICE/ Drivers/STM32F4xx_HAL_Driver/ Middlewares/   генерує CubeMX
 ├── Drivers/BSP/          драйвери пристроїв: rc522, gc9a01, gfx (+шрифт з кирилицею), joystick, lock, buzzer
 ├── App/Inc, App/Src      задачі FreeRTOS і сервіси: access_ctrl, access_list, event_log, menu,
@@ -64,15 +65,17 @@ firmware-stm32/SmartDoorLock/
 
 ## Збірка
 
-Потрібні STM32CubeIDE 2.x (з неї беруться `arm-none-eabi-gcc`, `cmake`, `ninja`) або будь-який GNU Arm Toolchain + CMake ≥ 3.22 + Ninja.
+Проєкт для **STM32CubeIDE 2.x**: *File → Import → General → Existing Projects into Workspace* → папка `firmware-stm32/SmartDoorLock` → *Build* (Debug або Release). Прошивка й налагодження — через ST-Link як зазвичай. Результат: `Debug/SmartDoorLock.elf`.
+
+Без GUI (так само збирає CubeIDE, зручно для CI):
 
 ```bash
-cd firmware-stm32/SmartDoorLock
-cmake --preset Debug
-cmake --build --preset Debug
+stm32cubeidec.exe --launcher.suppressErrors -nosplash \
+  -application org.eclipse.cdt.managedbuilder.core.headlessbuild \
+  -data <тимчасовий-workspace> -import firmware-stm32/SmartDoorLock -build SmartDoorLock/Debug
 ```
 
-Результат: `build/Debug/SmartDoorLock.elf`. CubeIDE 2.x відкриває його як CMake-проєкт (імпорт папки `firmware-stm32/SmartDoorLock`), прошивка й налагодження — через ST-Link як зазвичай. Детальніше та як регенерувати код з `.ioc` — у [docs/cubemx.md](docs/cubemx.md).
+Як змінити периферію і перегенерувати код з `.ioc`, не втративши свій код, — у [docs/cubemx.md](docs/cubemx.md).
 
 ### Тести на ПК
 
@@ -87,9 +90,9 @@ make
 
 | Метрика | Значення | Як отримати |
 |---|---|---|
-| Flash (Release / Debug) | 63 КБ / 108 КБ з 384 КБ | `--print-memory-usage` при збірці |
+| Flash (Release / Debug) | 63 КБ / 108 КБ з 384 КБ | Build Analyzer у CubeIDE або `arm-none-eabi-size` |
 | RAM | 56 КБ з 128 КБ (з них 32 КБ — heap FreeRTOS) | те саме |
-| Попередження компілятора | 0 (`-Wall -Wextra -Werror` на власному коді) | збірка |
+| Попередження компілятора | 0 (`-Wall` для всього проєкту; власний код чистий і з `-Wextra`) | «Build Finished. 0 errors, 0 warnings» |
 | Час повного кадру 240×240, DMA vs блокуючий SPI | вимірюється при старті | рядок `LCD full frame: …` у лозі |
 | Використання стеку (на платі) | tCtrl 30 %, tRfid 41 %, tInput 40 %, tUi 24 %, tNet 63 %, tLog 16 % | команда `stat`, або з RAM за маркером 0xA5 |
 | Heap FreeRTOS (на платі) | вільно 15,5 КБ, мінімум 14,4 КБ з 32 КБ | те саме |

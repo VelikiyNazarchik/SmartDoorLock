@@ -1,4 +1,4 @@
-# CubeMX, збірка і CubeIDE
+# CubeMX і STM32CubeIDE
 
 ## Конфігурація `.ioc`
 
@@ -15,9 +15,9 @@
 | TIM3 | CH1 PWM на PB4, PSC 95, ARR 499, Pulse 0, ARR preload |
 | IWDG | Prescaler **128**, Reload 1000 → ~4 с |
 | USB_OTG_FS + USB_DEVICE | Device only, CDC |
-| FreeRTOS | CMSIS_V2, heap_4, 32 КБ, mutex/timers, stack overflow check = 2, malloc failed hook |
+| FreeRTOS | CMSIS_V2, heap_4, 32 КБ, mutex/timers, stack overflow check = 2, malloc failed hook, **USE_NEWLIB_REENTRANT** (логер викликає `vsnprintf` з кількох задач) |
 | NVIC | EXTI9_5, DMA, USART1, SPI2, OTG_FS — пріоритет 5 (дозволено викликати FreeRTOS з ISR) |
-| Project Manager | тулчейн **CMake**, окремі `.c/.h` на кожну периферію, лише потрібні бібліотеки |
+| Project Manager | тулчейн **STM32CubeIDE**, *Generate Under Root*, окремі `.c/.h` на кожну периферію, лише потрібні бібліотеки |
 
 RTC у `.ioc` навмисно **не** увімкнено: `app_time.c` сам запускає LSE з таймаутом і переходить на LSI, якщо кварц не завівся (див. [architecture.md](architecture.md)).
 
@@ -28,16 +28,19 @@ RTC у `.ioc` навмисно **не** увімкнено: `app_time.c` сам 
 | `Core/Src/freertos.c` | `USER CODE Includes`, `4`, `5`, `RTOS_THREADS`, `StartDefaultTask` | `App_CreateRtosObjects()`, хуки переповнення стеку / нестачі heap, `osThreadExit()` у defaultTask |
 | `Core/Src/stm32f4xx_it.c` | `HardFault_IRQn 0` | запис причини + reset / `BKPT` під налагоджувачем |
 | `USB_DEVICE/App/usbd_cdc_if.c` | `INCLUDE`, `6` | прийом байтів консолі |
-| `STM32F411xx_FLASH.ld` | `MEMORY` | `FLASH LENGTH = 384K` (сектор 7 — дані) |
-| `CMakeLists.txt` | генерується лише раз | джерела App/ і BSP, include-шляхи, `-Wall -Wextra -Werror` для власного коду |
+| `STM32F411CEUX_FLASH.ld` | `MEMORY` | `FLASH LENGTH = 384K` (сектор 7 — дані) |
+| `.cproject` | Debug і Release | `App` як source-папка; include-шляхи `../App/Inc` і `../Drivers/BSP/*` (BSP компілюється як частина `Drivers`) |
 
-`main.c` не змінювався зовсім. Якщо після регенерації лінкер-скрипт повернеться до 512K, прошивка це помітить (`FLASH_STORE_IsSafe`) і відмовиться стирати сектор, у лозі буде помилка.
+`main.c` не змінювався зовсім. Регенерацію з цими змінами перевірено: CubeMX зберігає і USER CODE, і додані в `.cproject` папки/шляхи, і лінкер-скрипт. Якщо лінкер-скрипт колись повернеться до 512K, прошивка це помітить (`FLASH_STORE_IsSafe`) і відмовиться стирати сектор, у лозі буде помилка.
 
-## Регенерація коду
+## Робота в CubeIDE
 
-GUI: відкрити `.ioc` у STM32CubeMX → *Generate Code*.
+1. *File → Import → General → Existing Projects into Workspace* → *Select root directory*: `firmware-stm32/SmartDoorLock` → *Finish*. Не вмикати «Copy projects into workspace» — проєкт має лишатися в репозиторії.
+2. *Project → Build Project* (Debug / Release). Очікувано: `Build Finished. 0 errors, 0 warnings.`
+3. *Run → Debug As → STM32 C/C++ Application*, інтерфейс ST-Link SWD. Під налагоджувачем watchdog заморожується, breakpoint не перезавантажить плату.
+4. Змінити периферію: двічі клікнути `SmartDoorLock.ioc` (відкриється STM32CubeMX) → змінити → *Generate Code*. Свій код писати лише в `App/`, `Drivers/BSP/` і в секціях `USER CODE`.
 
-Командний рядок (так генерувався цей репозиторій):
+## Регенерація з командного рядка
 
 ```text
 config load "<повний шлях>\SmartDoorLock.ioc"
@@ -50,23 +53,17 @@ exit
 ```
 
 Нюанси, знайдені під час налаштування:
-- у тихому режимі CubeMX зависає назавжди, якщо показує діалог; причини, які траплялися: рукописний `ProjectManager.functionlistsort` і невалідний параметр джерела RTC у RCC;
-- генерація з тулчейном *STM32CubeIDE* у тихому режимі зависає на створенні Eclipse-проєкту — тому CMake;
+- у тихому режимі CubeMX зависає назавжди, якщо показує діалог. Траплялося: рукописний `ProjectManager.functionlistsort`, невалідний параметр джерела RTC у RCC і попередження «USE_NEWLIB_REENTRANT must be set» (показується лише для тулчейну STM32CubeIDE — тому опцію ввімкнено);
 - вихід CubeMX не можна обрізати через `| head`: закритий pipe вбиває процес посеред генерації.
 
-## Збірка з командного рядка
+## Збірка без GUI
 
 ```bash
-PL=/c/ST/STM32CubeIDE_2.2.0/STM32CubeIDE/plugins
-export PATH="$PL/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.14.3.rel1.win32_1.0.100.202602081740/tools/bin:$PL/com.st.stm32cube.ide.mcu.externaltools.cmake.win32_1.1.200.202605190741/tools/bin:$PL/com.st.stm32cube.ide.mcu.externaltools.ninja.win32_1.1.200.202606260906/tools/bin:$PATH"
-cd firmware-stm32/SmartDoorLock
-cmake --preset Debug && cmake --build --preset Debug
+cd C:/ST/STM32CubeIDE_2.2.0/STM32CubeIDE
+./stm32cubeidec.exe --launcher.suppressErrors -nosplash \
+  -application org.eclipse.cdt.managedbuilder.core.headlessbuild \
+  -data <тимчасовий workspace> -import <шлях>/firmware-stm32/SmartDoorLock \
+  -build SmartDoorLock/Debug
 ```
 
-(Назви папок плагінів залежать від версії CubeIDE.)
-
-## CubeIDE
-
-- **CubeIDE 2.x**: імпортувати папку `firmware-stm32/SmartDoorLock` як CMake-проєкт (майстер імпорту STM32 CMake у меню *File → Import*). Для налагодження — конфігурація *STM32 C/C++ Application* на `build/Debug/SmartDoorLock.elf`, ST-Link, SWD.
-- Хто хоче класичний Eclipse-проєкт: у CubeMX змінити тулчейн на *STM32CubeIDE* і згенерувати з GUI; потім додати `App` як *Source Folder* і include-шляхи `App/Inc` та кожну папку `Drivers/BSP/*`.
-- VS Code з розширенням STM32 працює з `CMakePresets.json` без змін.
+Результат: `firmware-stm32/SmartDoorLock/Debug/SmartDoorLock.elf` (папки `Debug/` і `Release/` у `.gitignore`).

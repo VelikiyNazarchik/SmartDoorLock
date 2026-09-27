@@ -88,7 +88,6 @@ AccessActions AC_HandleEvent(AccessCtx *ctx, const AppEvent *ev, uint32_t now_ms
 
 | План | Зроблено | Причина |
 |---|---|---|
-| Тулчейн STM32CubeIDE | CubeMX-тулчейн **CMake** | Збирається з командного рядка/CI; CubeIDE 2.x імпортує CMake-проєкт; генерація для CubeIDE у CLI-режимі CubeMX зависає |
 | RTC у CubeMX (LSE) | RTC налаштовується в `app_time.c` регістрами | Згенерований код зависає в `Error_Handler` назавжди, якщо кварц 32 кГц не стартує; тут — таймаут і перехід на LSI |
 | IWDG ~2 с | ~4 с | Стирання сектора Flash до 2 с |
 | USART1 RX DMA Normal | Circular | Прийом без пауз між пакетами для `ReceiveToIdle` (M5) |
