@@ -124,6 +124,13 @@ static void show_result(AccessCtx *c, AccessActions *a, bool ok, UiResult r, Acc
 
 /* ------------------------------------------------------------------ card handling */
 
+/* ISO/IEC 14443-3: a single-size UID starting with 0x08 is a random ID, regenerated on every
+ * activation (phones, many bank cards). Such a card could never be recognised again. */
+static bool uid_is_random(const AppEvent *ev)
+{
+    return ev->card.len == 4U && ev->card.uid[0] == 0x08U;
+}
+
 static void grant(AccessCtx *c, AccessActions *a, const AppEvent *ev, uint32_t now)
 {
     a->sound = BUZZ_OK;
@@ -184,6 +191,11 @@ static void on_card(AccessCtx *c, AccessActions *a, const AppEvent *ev, uint32_t
             set_log(a, LOGE_ACCESS_DENIED, ev->card.uid, ev->card.len);
             break;
         }
+        if (uid_is_random(ev)) {
+            /* keep the setup armed: the next, suitable card can still be presented */
+            show_result(c, a, false, RES_RANDOM_UID, AC_LOCKED, now);
+            break;
+        }
         c->setup_armed = false;
         c->pending_cmd = AC_CMD_ENROLL_ADMIN;
         a->cmd = AC_CMD_ENROLL_ADMIN;
@@ -194,9 +206,11 @@ static void on_card(AccessCtx *c, AccessActions *a, const AppEvent *ev, uint32_t
     case AC_ENROLL_WAIT_CARD:
         if (ev->card.cls != CARD_UNKNOWN) {
             show_result(c, a, false, RES_ALREADY_EXISTS, AC_ADMIN_MENU, now);
+        } else if (uid_is_random(ev)) {
+            show_result(c, a, false, RES_RANDOM_UID, AC_ADMIN_MENU, now);
         } else {
-            c->pending_cmd = AC_CMD_ENROLL_USER;
-            a->cmd = AC_CMD_ENROLL_USER;
+            c->pending_cmd = c->enroll_admin ? AC_CMD_ENROLL_ADMIN : AC_CMD_ENROLL_USER;
+            a->cmd = c->pending_cmd;
             memcpy(a->uid, ev->card.uid, ev->card.len);
             a->uid_len = ev->card.len;
         }
@@ -218,8 +232,10 @@ static void on_cmd_result(AccessCtx *c, AccessActions *a, const AppEvent *ev, ui
 
     switch (cmd) {
     case AC_CMD_ENROLL_ADMIN:
-        /* AC_LOCKED as "next" means: go to the base state computed at that moment */
-        show_result(c, a, ok, ok ? RES_ADMIN_ADDED : fail_reason, AC_LOCKED, now);
+        /* From setup: continue to the base state computed at that moment (AC_LOCKED marker);
+         * from the admin menu: back to the menu. */
+        show_result(c, a, ok, ok ? RES_ADMIN_ADDED : fail_reason,
+                    (c->state == AC_SETUP) ? AC_LOCKED : AC_ADMIN_MENU, now);
         break;
     case AC_CMD_ENROLL_USER:
         show_result(c, a, ok, ok ? RES_CARD_ADDED : fail_reason, AC_ADMIN_MENU, now);
@@ -257,9 +273,11 @@ static void activate_menu_item(AccessCtx *c, AccessActions *a, uint32_t now)
         enter(c, a, AC_UNLOCKED, now);
         break;
     case MENU_ADD_CARD:
+    case MENU_ADD_ADMIN:
         if (c->card_count >= CFG_MAX_CARDS) {
             show_result(c, a, false, RES_LIST_FULL, AC_ADMIN_MENU, now);
         } else {
+            c->enroll_admin = ((MenuItem)c->menu_sel == MENU_ADD_ADMIN);
             enter(c, a, AC_ENROLL_WAIT_CARD, now);
         }
         break;

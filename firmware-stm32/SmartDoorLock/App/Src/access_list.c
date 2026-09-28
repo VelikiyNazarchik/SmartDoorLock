@@ -143,7 +143,7 @@ AL_Status AL_Add(AccessList *al, const uint8_t *uid, uint8_t len, bool admin)
 
     /* Name it after the lowest free number so names stay short and stable after deletions. */
     const char *prefix = admin ? "Admin" : "Card";
-    char name[CFG_CARD_NAME_LEN];
+    char name[CFG_CARD_NAME_LEN] = { 0 };
     for (unsigned n = 1; n <= 99U; n++) {
         (void)snprintf(name, sizeof(name), "%s %02u", prefix, n);
         bool taken = false;

@@ -56,6 +56,8 @@ static void start_locked(void)
     (void)AC_Start(&c, 0);
 }
 
+static void start_setup_armed(void);
+
 static void open_menu(uint32_t now)
 {
     (void)send(card(CARD_ADMIN, 1), now);
@@ -317,6 +319,67 @@ static void test_enroll_new_card(void)
     CHECK_EQ(AC_GetState(&c), AC_ADMIN_MENU);
 }
 
+static void test_enroll_admin_from_menu(void)
+{
+    start_locked();
+    open_menu(0);
+    menu_select(MENU_ADD_ADMIN, 10);
+    CHECK_EQ(AC_GetState(&c), AC_ENROLL_WAIT_CARD);
+    CHECK(c.enroll_admin);
+
+    AccessActions a = send(card(CARD_UNKNOWN, 0x66), 20);
+    CHECK_EQ(a.cmd, AC_CMD_ENROLL_ADMIN);
+    CHECK_EQ(a.uid[0], 0x66);
+
+    AC_SetCounts(&c, 3, 2, 0);
+    a = send(result(true, RES_NONE), 30);
+    CHECK_EQ(AC_Screen(&c), SCR_RESULT_OK);
+    CHECK_EQ(c.result, RES_ADMIN_ADDED);
+    CHECK_EQ(a.log_type, LOGE_CARD_ADDED);
+
+    (void)send(ev(EV_TIMEOUT), 30 + CFG_RESULT_SHOW_MS);
+    CHECK_EQ(AC_GetState(&c), AC_ADMIN_MENU);   /* back to the menu, not to setup/locked */
+}
+
+static void test_add_card_after_add_admin_is_user(void)
+{
+    start_locked();
+    open_menu(0);
+    menu_select(MENU_ADD_ADMIN, 10);
+    (void)send(joy(JOY_LEFT), 20);
+    CHECK_EQ(AC_GetState(&c), AC_ADMIN_MENU);
+    menu_select(MENU_ADD_CARD, 30);
+    CHECK(!c.enroll_admin);
+    AccessActions a = send(card(CARD_UNKNOWN, 0x67), 40);
+    CHECK_EQ(a.cmd, AC_CMD_ENROLL_USER);
+}
+
+static void test_random_uid_rejected_in_menu(void)
+{
+    start_locked();
+    open_menu(0);
+    menu_select(MENU_ADD_CARD, 10);
+    AccessActions a = send(card(CARD_UNKNOWN, 0x08), 20);   /* 08 xx xx xx = random ID */
+    CHECK_EQ(a.cmd, AC_CMD_NONE);
+    CHECK_EQ(AC_Screen(&c), SCR_RESULT_FAIL);
+    CHECK_EQ(c.result, RES_RANDOM_UID);
+    (void)send(ev(EV_TIMEOUT), 20 + CFG_RESULT_SHOW_MS);
+    CHECK_EQ(AC_GetState(&c), AC_ADMIN_MENU);
+}
+
+static void test_random_uid_rejected_in_setup_keeps_arming(void)
+{
+    start_setup_armed();
+    AccessActions a = send(card(CARD_UNKNOWN, 0x08), 6000);
+    CHECK_EQ(a.cmd, AC_CMD_NONE);
+    CHECK_EQ(c.result, RES_RANDOM_UID);
+    (void)send(ev(EV_TIMEOUT), 6000 + CFG_RESULT_SHOW_MS);
+    CHECK_EQ(AC_GetState(&c), AC_SETUP);
+    CHECK(AC_SetupArmed(&c, 8000));
+    a = send(card(CARD_UNKNOWN, 0x11), 8000);                 /* a proper card still works */
+    CHECK_EQ(a.cmd, AC_CMD_ENROLL_ADMIN);
+}
+
 static void test_enroll_known_card_rejected(void)
 {
     start_locked();
@@ -535,6 +598,10 @@ int main(void)
     RUN(test_menu_idle_timeout);
     RUN(test_menu_open_door);
     RUN(test_enroll_new_card);
+    RUN(test_enroll_admin_from_menu);
+    RUN(test_add_card_after_add_admin_is_user);
+    RUN(test_random_uid_rejected_in_menu);
+    RUN(test_random_uid_rejected_in_setup_keeps_arming);
     RUN(test_enroll_known_card_rejected);
     RUN(test_enroll_storage_error);
     RUN(test_enroll_wait_times_out_to_menu);

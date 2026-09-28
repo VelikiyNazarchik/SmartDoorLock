@@ -36,7 +36,8 @@ typedef enum {
     RES_LIST_FULL,
     RES_LIST_EMPTY,
     RES_LAST_ADMIN,
-    RES_STORAGE_ERROR
+    RES_STORAGE_ERROR,
+    RES_RANDOM_UID          /* card changes its UID on every tap (phone, many bank cards) */
 } UiResult;
 
 typedef struct {

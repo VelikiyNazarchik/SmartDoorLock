@@ -81,6 +81,7 @@ typedef struct {
     uint8_t     fail_count;
     bool        setup_armed;
     uint32_t    setup_armed_until;
+    bool        enroll_admin;    /* AC_ENROLL_WAIT_CARD adds an admin card instead of a user card */
 } AccessCtx;
 
 void          AC_Init(AccessCtx *ctx, uint16_t unlock_time_s);

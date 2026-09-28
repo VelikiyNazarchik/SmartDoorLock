@@ -89,6 +89,7 @@ static const char *result_text(uint8_t r)
     case RES_LIST_EMPTY:     return "Список порожній";
     case RES_LAST_ADMIN:     return "Останній адмін";
     case RES_STORAGE_ERROR:  return "Помилка Flash";
+    case RES_RANDOM_UID:     return "Змінний UID";
     default:                 return "";
     }
 }
@@ -180,7 +181,7 @@ static bool same_screen(const UiCommand *c, const UiCommand *prev)
     if (c->screen == SCR_RESULT_OK || c->screen == SCR_RESULT_FAIL) {
         return prev->result == c->result;
     }
-    if (c->screen == SCR_SETUP) {
+    if (c->screen == SCR_SETUP || c->screen == SCR_ENROLL) {
         return prev->value == c->value;
     }
     return true;
@@ -273,7 +274,7 @@ void UI_Draw(const UiCommand *c, const UiCommand *prev)
         if (!same) {
             frame(GFX_BLUE);
             icon_card(GFX_BLUE);
-            text(118, "ДОДАТИ КАРТКУ", 2, GFX_WHITE);
+            text(118, (c->value != 0U) ? "ДОДАТИ АДМІНА" : "ДОДАТИ КАРТКУ", 2, GFX_WHITE);
             text(146, "Прикладіть нову", 2, GFX_GREY);
             text(168, "картку", 2, GFX_GREY);
             text(200, "< назад", 1, GFX_GREY);

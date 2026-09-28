@@ -3,6 +3,7 @@
 static const char *const labels[MENU_COUNT] = {
     [MENU_OPEN_DOOR]   = "Відчинити",
     [MENU_ADD_CARD]    = "Додати картку",
+    [MENU_ADD_ADMIN]   = "Додати адміна",
     [MENU_DELETE_CARD] = "Видалити картку",
     [MENU_EVENT_LOG]   = "Журнал",
     [MENU_UNLOCK_TIME] = "Час відкриття",

@@ -9,6 +9,7 @@
 typedef enum {
     MENU_OPEN_DOOR = 0,
     MENU_ADD_CARD,
+    MENU_ADD_ADMIN,
     MENU_DELETE_CARD,
     MENU_EVENT_LOG,
     MENU_UNLOCK_TIME,

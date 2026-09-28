@@ -27,7 +27,7 @@ stateDiagram-v2
     FAULT --> UNLOCKED: кнопка виходу
 
     ADMIN_MENU --> UNLOCKED: «Відчинити»
-    ADMIN_MENU --> ENROLL_WAIT_CARD: «Додати картку»
+    ADMIN_MENU --> ENROLL_WAIT_CARD: «Додати картку» / «Додати адміна»
     ADMIN_MENU --> DELETE_SELECT: «Видалити картку»
     ADMIN_MENU --> LOG_VIEW: «Журнал»
     ADMIN_MENU --> SETTINGS: «Час відкриття»
@@ -66,6 +66,7 @@ stateDiagram-v2
 | не меню | `EV_NET_UNLOCK` | — | UNLOCKED | журнал `NET_UNLOCK` |
 | меню | `EV_NET_UNLOCK` | — | без змін | адміністратор біля пристрою — ігнор |
 | ADMIN_MENU | ↑ / ↓ | — | ADMIN_MENU | курсор по колу, клік-звук, перезапуск таймера бездіяльності |
+| ENROLL_WAIT_CARD | `EV_CARD` | невідома | (RESULT) | команда `ENROLL_USER` або, якщо зайшли через «Додати адміна», `ENROLL_ADMIN`; після результату — назад у меню |
 | DELETE_SELECT | клік / → | — | (RESULT) | команда `DELETE(index)`; останнього адміна видалити не можна |
 | SETTINGS | ↑ / ↓ | 1…30 с | SETTINGS | змінити значення (ще не збережене) |
 | SETTINGS | клік / → | — | (RESULT) | команда `SAVE_SETTINGS`; новий час застосовується лише після успішного запису |

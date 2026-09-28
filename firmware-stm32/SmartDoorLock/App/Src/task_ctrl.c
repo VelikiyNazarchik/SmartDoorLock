@@ -140,6 +140,9 @@ static void send_ui(void)
     case SCR_SETUP:
         u.value = AC_SetupArmed(&s_ac, now_ms()) ? 1U : 0U;
         break;
+    case SCR_ENROLL:
+        u.value = s_ac.enroll_admin ? 1U : 0U;
+        break;
     default:
         break;
     }
