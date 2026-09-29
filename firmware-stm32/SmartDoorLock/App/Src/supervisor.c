@@ -5,129 +5,37 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "app_config.h"
-#include "app_rtos.h"
 #include "app_time.h"
 #include "logger.h"
 #include "supervisor.h"
 
-/* RTC backup register 0: 0x5AFE | reason << 8 | task id. Survives the reset, cleared at boot. */
-#define BKP_REASON_IDX   0U
-#define BKP_MAGIC        0x5AFE0000UL
-#define BKP_MAGIC_MASK   0xFFFF0000UL
-#define TASK_ID_UNKNOWN  0xFFU
-#define ALL_TASK_BITS    ((1UL << TASK_COUNT) - 1UL)
+/* Backup-регістр 0 переживає reset. Формат: 0x5AFE | причина << 8 | номер задачі. */
+#define BKP_REASON    0U
+#define BKP_MAGIC     0x5AFE0000UL
+#define NO_TASK       0xFFU
 
-typedef struct {
-    osThreadId_t th;
-    const char  *name;
-    uint32_t     stack_words;
-    uint32_t     last_seen;
-} TaskSlot;
+static osThreadId_t      s_thread[TASK_COUNT];
+static const char       *s_name[TASK_COUNT];
+static uint32_t          s_stack_words[TASK_COUNT];
+static volatile uint32_t s_last_beat[TASK_COUNT];
+static volatile uint32_t s_hang_request;
+static osThreadId_t      s_super_thread;
 
-static TaskSlot          s_tasks[TASK_COUNT];
-static osEventFlagsId_t  s_hb;
-static volatile uint32_t s_hang_mask;
-static uint32_t          s_reset_flags;
-static uint32_t          s_reset_bkp;
-static char              s_reset_text[80];
-static osThreadId_t      s_super_th;
-
-static const char *const k_reason_text[] = {
-    [RESET_REASON_NONE]           = "",
-    [RESET_REASON_TASK_HUNG]      = "hung",
-    [RESET_REASON_STACK_OVERFLOW] = "stack overflow",
-    [RESET_REASON_MALLOC_FAILED]  = "out of heap",
-    [RESET_REASON_HARDFAULT]      = "hard fault",
-    [RESET_REASON_CONSOLE]        = "console reboot",
-};
-
-static const char *task_name(uint32_t id)
-{
-    return (id < TASK_COUNT && s_tasks[id].name != NULL) ? s_tasks[id].name : "?";
-}
-
-static void build_reset_text(void)
-{
-    const char *cause;
-    if (s_reset_flags & RCC_CSR_IWDGRSTF) {
-        cause = "watchdog";
-    } else if (s_reset_flags & RCC_CSR_SFTRSTF) {
-        cause = "software";
-    } else if (s_reset_flags & (RCC_CSR_PORRSTF | RCC_CSR_BORRSTF)) {
-        cause = "power-on";
-    } else if (s_reset_flags & RCC_CSR_PINRSTF) {
-        cause = "reset pin";
-    } else {
-        cause = "unknown";
-    }
-
-    if ((s_reset_bkp & BKP_MAGIC_MASK) == BKP_MAGIC) {
-        uint32_t reason = (s_reset_bkp >> 8) & 0xFFU;
-        uint32_t id = s_reset_bkp & 0xFFU;
-        const char *rt = (reason < sizeof(k_reason_text) / sizeof(k_reason_text[0])) ? k_reason_text[reason] : "?";
-        if (id == TASK_ID_UNKNOWN) {
-            (void)snprintf(s_reset_text, sizeof(s_reset_text), "%s (%s)", cause, rt);
-        } else {
-            (void)snprintf(s_reset_text, sizeof(s_reset_text), "%s (task %s: %s)", cause, task_name(id), rt);
-        }
-    } else {
-        (void)snprintf(s_reset_text, sizeof(s_reset_text), "%s", cause);
-    }
-}
+static uint32_t s_reset_flags;
+static uint32_t s_reset_bkp;
+static char     s_reset_text[80];
 
 void SUP_Init(void)
 {
     s_reset_flags = RCC->CSR;
     RCC->CSR |= RCC_CSR_RMVF;
-    s_reset_bkp = TIME_BkpRead(BKP_REASON_IDX);
-    TIME_BkpWrite(BKP_REASON_IDX, 0);
-
-    static const osEventFlagsAttr_t attr = { .name = "heartbeat" };
-    s_hb = osEventFlagsNew(&attr);
+    s_reset_bkp = TIME_BkpRead(BKP_REASON);
+    TIME_BkpWrite(BKP_REASON, 0);
 }
 
-void SUP_Register(TaskId id, osThreadId_t thread, const char *name, uint32_t stack_words)
+static void save_reason(ResetReason reason, uint32_t task)
 {
-    if (id >= TASK_COUNT) {
-        return;
-    }
-    s_tasks[id].th = thread;
-    s_tasks[id].name = name;
-    s_tasks[id].stack_words = stack_words;
-}
-
-void SUP_Heartbeat(TaskId id)
-{
-    uint32_t bit = 1UL << id;
-    if (s_hang_mask & bit) {
-        s_hang_mask &= ~bit;
-        LOG_WARN("simulating a hang: no more heartbeats from this task");
-        for (;;) {
-            osDelay(1000);
-        }
-    }
-    (void)osEventFlagsSet(s_hb, bit);
-}
-
-bool SUP_RequestHang(const char *name)
-{
-    for (uint32_t i = 0; i < TASK_COUNT; i++) {
-        if (s_tasks[i].name != NULL && strcmp(s_tasks[i].name, name) == 0) {
-            s_hang_mask |= 1UL << i;
-            return true;
-        }
-    }
-    return false;
-}
-
-static void kick(void)
-{
-    (void)HAL_IWDG_Refresh(&hiwdg);
-}
-
-void SUP_KickBeforeLongOp(void)
-{
-    kick();
+    TIME_BkpWrite(BKP_REASON, BKP_MAGIC | ((uint32_t)reason << 8) | task);
 }
 
 bool SUP_WasWatchdogReset(void)
@@ -137,21 +45,97 @@ bool SUP_WasWatchdogReset(void)
 
 const char *SUP_ResetText(void)
 {
-    if (s_reset_text[0] == '\0') {
-        build_reset_text();
+    const char *cause = "unknown";
+    if (s_reset_flags & RCC_CSR_IWDGRSTF) {
+        cause = "watchdog";
+    } else if (s_reset_flags & RCC_CSR_SFTRSTF) {
+        cause = "software";
+    } else if (s_reset_flags & (RCC_CSR_PORRSTF | RCC_CSR_BORRSTF)) {
+        cause = "power-on";
+    } else if (s_reset_flags & RCC_CSR_PINRSTF) {
+        cause = "reset pin";
+    }
+
+    static const char *const reasons[] = { "", "hung", "stack overflow", "out of heap", "hard fault", "console reboot" };
+    uint32_t reason = (s_reset_bkp >> 8) & 0xFFU;
+    uint32_t task = s_reset_bkp & 0xFFU;
+    bool ours = (s_reset_bkp & 0xFFFF0000UL) == BKP_MAGIC && reason < sizeof(reasons) / sizeof(reasons[0]);
+
+    if (!ours) {
+        snprintf(s_reset_text, sizeof(s_reset_text), "%s", cause);
+    } else if (task < TASK_COUNT && s_name[task] != NULL) {
+        snprintf(s_reset_text, sizeof(s_reset_text), "%s (task %s: %s)", cause, s_name[task], reasons[reason]);
+    } else {
+        snprintf(s_reset_text, sizeof(s_reset_text), "%s (%s)", cause, reasons[reason]);
     }
     return s_reset_text;
 }
 
-static void print_stack(const char *name, osThreadId_t th, uint32_t total)
+void SUP_FatalReset(ResetReason reason, const char *task_name)
 {
-    if (th == NULL || total == 0U) {
-        return;
+    uint32_t task = NO_TASK;
+    for (uint32_t i = 0; i < TASK_COUNT && task_name != NULL; i++) {
+        if (s_name[i] != NULL && strcmp(s_name[i], task_name) == 0) {
+            task = i;
+        }
     }
-    uint32_t free_words = (uint32_t)uxTaskGetStackHighWaterMark((TaskHandle_t)th);
-    uint32_t used = (free_words < total) ? total - free_words : 0U;
-    LOG_Raw("  %-7s stack %4lu/%4lu words used (%2lu%%)", name,
-            (unsigned long)used, (unsigned long)total, (unsigned long)(used * 100U / total));
+    save_reason(reason, task);
+    if (CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) {
+        __BKPT(0);   /* під налагоджувачем зупиняємось тут, щоб подивитись Fault Analyzer */
+    }
+    NVIC_SystemReset();
+}
+
+void SUP_Register(TaskId id, osThreadId_t thread, const char *name, uint32_t stack_words)
+{
+    s_thread[id] = thread;
+    s_name[id] = name;
+    s_stack_words[id] = stack_words;
+}
+
+void SUP_Heartbeat(TaskId id)
+{
+    if (s_hang_request & (1UL << id)) {
+        LOG_WARN("simulating a hang: this task stops sending heartbeats");
+        for (;;) {
+            osDelay(1000);
+        }
+    }
+    s_last_beat[id] = osKernelGetTickCount();
+}
+
+bool SUP_RequestHang(const char *name)
+{
+    for (uint32_t i = 0; i < TASK_COUNT; i++) {
+        if (s_name[i] != NULL && strcmp(s_name[i], name) == 0) {
+            s_hang_request |= 1UL << i;
+            return true;
+        }
+    }
+    return false;
+}
+
+void SUP_KickWatchdog(void)
+{
+    (void)HAL_IWDG_Refresh(&hiwdg);
+}
+
+static int find_silent_task(uint32_t now)
+{
+    for (int i = 0; i < TASK_COUNT; i++) {
+        if (s_thread[i] != NULL && (now - s_last_beat[i]) > CFG_TASK_TIMEOUT_MS) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void print_stack(const char *name, osThreadId_t thread, uint32_t words)
+{
+    uint32_t free_words = uxTaskGetStackHighWaterMark((TaskHandle_t)thread);
+    uint32_t used = words - free_words;
+    LOG_Raw("  %-7s stack %4lu/%4lu words (%2lu%%)", name,
+            (unsigned long)used, (unsigned long)words, (unsigned long)(used * 100U / words));
 }
 
 void SUP_PrintStats(void)
@@ -159,28 +143,19 @@ void SUP_PrintStats(void)
     LOG_Raw("--- uptime %lus, heap free %u B (min %u B), log lines dropped %lu",
             (unsigned long)(HAL_GetTick() / 1000U), (unsigned)xPortGetFreeHeapSize(),
             (unsigned)xPortGetMinimumEverFreeHeapSize(), (unsigned long)LOG_Dropped());
-    for (uint32_t i = 0; i < TASK_COUNT; i++) {
-        print_stack(s_tasks[i].name, s_tasks[i].th, s_tasks[i].stack_words);
-    }
-    print_stack("tSuper", s_super_th, CFG_STACK_SUPER);
-}
-
-void SUP_FatalReset(ResetReason reason, const char *task_name_hint)
-{
-    uint32_t id = TASK_ID_UNKNOWN;
-    if (task_name_hint != NULL) {
-        for (uint32_t i = 0; i < TASK_COUNT; i++) {
-            if (s_tasks[i].name != NULL && strcmp(s_tasks[i].name, task_name_hint) == 0) {
-                id = i;
-                break;
-            }
+    for (int i = 0; i < TASK_COUNT; i++) {
+        if (s_thread[i] != NULL) {
+            print_stack(s_name[i], s_thread[i], s_stack_words[i]);
         }
     }
-    TIME_BkpWrite(BKP_REASON_IDX, BKP_MAGIC | ((uint32_t)reason << 8) | id);
-    if (CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) {
-        __BKPT(0);   /* stop here for the debugger / Fault Analyzer */
+    if (s_super_thread != NULL) {
+        print_stack("tSuper", s_super_thread, CFG_STACK_SUPER);
     }
-    NVIC_SystemReset();
+}
+
+static void set_led(bool on)
+{
+    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, on ? GPIO_PIN_RESET : GPIO_PIN_SET);
 }
 
 static void wait_ms(uint32_t ms)
@@ -191,21 +166,21 @@ static void wait_ms(uint32_t ms)
 void TaskSuper(void *arg)
 {
     (void)arg;
-    s_super_th = osThreadGetId();
+    s_super_thread = osThreadGetId();
 
-    /* Halting on a breakpoint must not let the watchdog reset the board. */
+    /* Під налагоджувачем зупинка на breakpoint не повинна перезавантажувати плату. */
     if (CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) {
         __HAL_DBGMCU_FREEZE_IWDG();
     }
-    kick();
+    SUP_KickWatchdog();
 
-    (void)TIME_Init(wait_ms, kick);
+    (void)TIME_Init(wait_ms, SUP_KickWatchdog);
     LOG_INFO("SmartDoorLock %s, reset cause: %s", APP_VERSION, SUP_ResetText());
     LOG_INFO("RTC on %s, calendar %s", TIME_SourceName(), TIME_IsSet() ? "set" : "not set");
 
     uint32_t now = osKernelGetTickCount();
-    for (uint32_t i = 0; i < TASK_COUNT; i++) {
-        s_tasks[i].last_seen = now;
+    for (int i = 0; i < TASK_COUNT; i++) {
+        s_last_beat[i] = now;
     }
     uint32_t next_stats = now + CFG_STATS_PERIOD_MS;
     bool reported = false;
@@ -213,37 +188,16 @@ void TaskSuper(void *arg)
     for (;;) {
         osDelay(CFG_SUPERVISOR_PERIOD_MS);
         now = osKernelGetTickCount();
-        uint32_t beats = osEventFlagsClear(s_hb, ALL_TASK_BITS);   /* returns the bits before clearing */
-        if (beats & osFlagsError) {
-            beats = 0;
-        }
 
-        int hung = -1;
-        for (uint32_t i = 0; i < TASK_COUNT; i++) {
-            if (s_tasks[i].th == NULL) {
-                continue;
-            }
-            if (beats & (1UL << i)) {
-                s_tasks[i].last_seen = now;
-            } else if ((now - s_tasks[i].last_seen) > CFG_TASK_TIMEOUT_MS && hung < 0) {
-                hung = (int)i;
-            }
-        }
-
-        if (hung < 0) {
-            kick();
-            /* Alive LED (PC13, active low): 1 Hz blink while every task reports in. */
-            if ((now / 500U) & 1U) {
-                HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
-            } else {
-                HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
-            }
+        int silent = find_silent_task(now);
+        if (silent < 0) {
+            SUP_KickWatchdog();
+            set_led((now / 500U) % 2U == 0U);
         } else if (!reported) {
-            HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);   /* steady on: reset pending */
             reported = true;
-            TIME_BkpWrite(BKP_REASON_IDX, BKP_MAGIC | ((uint32_t)RESET_REASON_TASK_HUNG << 8) | (uint32_t)hung);
-            LOG_ERR("task %s silent for %lu ms: watchdog no longer fed, reset follows",
-                    task_name((uint32_t)hung), (unsigned long)(now - s_tasks[hung].last_seen));
+            set_led(true);
+            save_reason(RESET_REASON_TASK_HUNG, (uint32_t)silent);
+            LOG_ERR("task %s is silent: watchdog is no longer fed, reset follows", s_name[silent]);
         }
 
         if ((int32_t)(now - next_stats) >= 0) {

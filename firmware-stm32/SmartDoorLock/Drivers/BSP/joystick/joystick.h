@@ -34,9 +34,7 @@ typedef struct {
 } JOY_Handle;
 
 JOY_Status JOY_Init(JOY_Handle *j, ADC_HandleTypeDef *hadc, uint32_t ch_x, uint32_t ch_y, const JOY_Params *p);
-/* Averages samples with the stick at rest; call once at start-up. */
 JOY_Status JOY_Calibrate(JOY_Handle *j);
-/* Samples both axes and updates j->x, j->y, j->dir. */
 JOY_Status JOY_Read(JOY_Handle *j, JOY_Direction *dir);
 
 #endif

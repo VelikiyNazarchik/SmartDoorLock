@@ -2,7 +2,7 @@
 #include "gc9a01_init.h"
 
 #define LCD_SPI_TIMEOUT_MS   50U
-#define LCD_DMA_MIN_BYTES    64U      /* below this a blocking transfer is cheaper than DMA set-up */
+#define LCD_DMA_MIN_BYTES    64U
 #define LCD_DMA_MAX_BYTES    65534U   /* DMA NDTR is 16 bit; keep it even so no pixel is split */
 
 static void cs(LCD_Handle *h, bool active)

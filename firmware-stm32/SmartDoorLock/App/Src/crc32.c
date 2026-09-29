@@ -1,6 +1,6 @@
 #include "crc32.h"
 
-/* Nibble table: 64 bytes of Flash instead of 1 KB for the byte-wide table. */
+/* Таблиця по 4 біти: 64 байти Flash замість 1 КБ для побайтової таблиці. */
 static const uint32_t nibble_table[16] = {
     0x00000000UL, 0x1DB71064UL, 0x3B6E20C8UL, 0x26D930ACUL,
     0x76DC4190UL, 0x6B6B51F4UL, 0x4DB26158UL, 0x5005713CUL,

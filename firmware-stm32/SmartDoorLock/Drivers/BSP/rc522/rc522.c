@@ -7,7 +7,7 @@
 #define RC522_IRQ_GUARD_MS       40U
 #define RC522_FIFO_MAX           16U
 
-/* ---------------------------------------------------------------- SPI access (datasheet 8.1.2) */
+/* SPI access (datasheet 8.1.2) */
 
 static void cs_low(RC522_Handle *h)  { HAL_GPIO_WritePin(h->cs_port, h->cs_pin, GPIO_PIN_RESET); }
 static void cs_high(RC522_Handle *h) { HAL_GPIO_WritePin(h->cs_port, h->cs_pin, GPIO_PIN_SET); }
@@ -39,7 +39,7 @@ static RC522_Status reg_set_bits(RC522_Handle *h, uint8_t reg, uint8_t mask)
     return (st == RC522_OK) ? reg_write(h, reg, (uint8_t)(v | mask)) : st;
 }
 
-/* ---------------------------------------------------------------- ISO/IEC 14443-3 CRC_A (Annex B) */
+/* ISO/IEC 14443-3 CRC_A (Annex B) */
 
 static uint16_t crc_a(const uint8_t *data, uint8_t len)
 {
@@ -53,7 +53,7 @@ static uint16_t crc_a(const uint8_t *data, uint8_t len)
     return crc;
 }
 
-/* ---------------------------------------------------------------- Transceive (datasheet 10.3.1.8) */
+/* Transceive (datasheet 10.3.1.8) */
 
 typedef struct {
     uint8_t buf[RC522_FIFO_MAX];
@@ -116,8 +116,6 @@ static RC522_Status transceive(RC522_Handle *h, const uint8_t *tx, uint8_t tx_le
     }
     return RC522_OK;
 }
-
-/* ---------------------------------------------------------------- Public API */
 
 RC522_Status RC522_Init(RC522_Handle *h)
 {

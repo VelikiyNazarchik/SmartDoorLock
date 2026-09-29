@@ -3,8 +3,6 @@
 
 #include <stdint.h>
 
-/* HAL-free joystick math, unit-tested on the PC (Tests/test_joystick_math.c). */
-
 typedef enum {
     JOY_NONE = 0,
     JOY_UP,

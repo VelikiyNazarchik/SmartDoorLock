@@ -41,7 +41,7 @@ static osThreadId_t start_task(osThreadFunc_t fn, const char *name, uint32_t sta
     };
     osThreadId_t th = osThreadNew(fn, NULL, &attr);
     if (th == NULL) {
-        Error_Handler();   /* out of heap at start-up: a configuration error */
+        Error_Handler();
     }
     return th;
 }

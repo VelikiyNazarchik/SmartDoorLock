@@ -36,24 +36,18 @@
 #define RC522_CMD_TRANSCEIVE     0x0CU
 #define RC522_CMD_SOFT_RESET     0x0FU
 
-/* ComIrqReg bits */
 #define RC522_IRQ_TIMER          0x01U
 #define RC522_IRQ_ERR            0x02U
 #define RC522_IRQ_IDLE           0x10U
 #define RC522_IRQ_RX             0x20U
-/* DivIrqReg bits */
 #define RC522_DIVIRQ_CRC         0x04U
-/* ErrorReg bits */
 #define RC522_ERR_PROTOCOL_BIT   0x01U
 #define RC522_ERR_PARITY_BIT     0x02U
 #define RC522_ERR_CRC_BIT        0x04U
 #define RC522_ERR_COLL_BIT       0x08U
 #define RC522_ERR_BUF_OVFL_BIT   0x10U
-/* CommandReg bits */
 #define RC522_COMMAND_POWER_DOWN 0x10U
-/* BitFramingReg bits */
 #define RC522_BITFRAMING_START   0x80U
-/* FIFOLevelReg bits */
 #define RC522_FIFO_FLUSH         0x80U
 
 /* ISO/IEC 14443-3 PICC commands */

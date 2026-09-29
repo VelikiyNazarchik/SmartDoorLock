@@ -7,16 +7,16 @@
 #include "logger.h"
 #include "supervisor.h"
 
-/* tInput: owner of ADC1 and the two buttons. Buttons raise EXTI interrupts; the ISR only sets a
- * thread flag, debouncing happens here in task context. */
+/* tInput: власник ADC1 (джойстик) і двох кнопок. Кнопки викликають переривання EXTI;
+ * переривання лише ставить прапорець задачі, а антидребезг робиться тут, у задачі. */
 
 typedef struct {
     GPIO_TypeDef *port;
     uint16_t      pin;
     uint32_t      flag;
     AppEventType  event;
-    bool          pending;    /* edge seen, waiting for the debounce time */
-    bool          pressed;    /* reported, waiting for release */
+    bool          pending;
+    bool          pressed;
     uint32_t      edge_ms;
 } Button;
 
@@ -31,7 +31,7 @@ static JOY_Handle s_joy;
 void HAL_GPIO_EXTI_Callback(uint16_t pin)
 {
     if (tInputHandle == NULL) {
-        return;   /* before the scheduler starts */
+        return;
     }
     if (pin == EXIT_BTN_Pin) {
         (void)osThreadFlagsSet(tInputHandle, FLAG_BTN_EXIT);
@@ -53,7 +53,7 @@ static void handle_buttons(uint32_t flags, uint32_t now)
 {
     for (uint32_t i = 0; i < BUTTON_COUNT; i++) {
         Button *b = &s_buttons[i];
-        bool down = (HAL_GPIO_ReadPin(b->port, b->pin) == GPIO_PIN_RESET);   /* pull-up, active low */
+        bool down = (HAL_GPIO_ReadPin(b->port, b->pin) == GPIO_PIN_RESET);
 
         if ((flags & b->flag) && !b->pressed && !b->pending) {
             b->pending = true;
@@ -114,7 +114,7 @@ void TaskInput(void *arg)
                 repeat_at = now + CFG_JOY_REPEAT_DELAY_MS;
             }
         } else if ((dir == JOY_UP || dir == JOY_DOWN) && (int32_t)(now - repeat_at) >= 0) {
-            post(EV_JOY_DIR, dir);   /* auto-repeat for scrolling lists */
+            post(EV_JOY_DIR, dir);
             repeat_at = now + CFG_JOY_REPEAT_MS;
         }
     }

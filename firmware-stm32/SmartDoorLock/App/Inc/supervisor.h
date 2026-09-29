@@ -5,9 +5,11 @@
 #include <stdint.h>
 #include "cmsis_os2.h"
 
-/* Task supervisor: every task reports a heartbeat; tSuper refreshes the IWDG only while all of
- * them are alive. One hung task -> no refresh -> hardware reset ~4 s later. The reason is kept
- * in an RTC backup register and reported after the reboot. */
+/* Супервізор задач.
+ * Кожна задача в своєму циклі викликає SUP_Heartbeat() ("я жива").
+ * tSuper раз на 250 мс перевіряє: якщо всі задачі відзвітували за останні 2 с — годує watchdog.
+ * Якщо хоч одна мовчить — перестає годувати, і через ~4 с апаратний IWDG перезавантажує плату.
+ * Причина (яка задача зависла) зберігається в backup-регістрі RTC і показується після reset. */
 
 typedef enum {
     TASK_CTRL = 0,
@@ -28,19 +30,15 @@ typedef enum {
     RESET_REASON_CONSOLE
 } ResetReason;
 
-/* Before the scheduler starts: reads and clears the reset flags. */
 void        SUP_Init(void);
 void        SUP_Register(TaskId id, osThreadId_t thread, const char *name, uint32_t stack_words);
 void        SUP_Heartbeat(TaskId id);
-/* Test hook for the debug console: the task blocks forever at its next heartbeat. */
 bool        SUP_RequestHang(const char *name);
-/* Feeds the watchdog right before a long CPU stall (Flash sector erase). */
-void        SUP_KickBeforeLongOp(void);
+void        SUP_KickWatchdog(void);
 void        SUP_PrintStats(void);
 bool        SUP_WasWatchdogReset(void);
 const char *SUP_ResetText(void);
 
-/* Record the reason and reset. Safe from fault handlers and kernel hooks. */
 void        SUP_FatalReset(ResetReason reason, const char *task_name) __attribute__((noreturn));
 
 #endif

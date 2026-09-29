@@ -1,4 +1,4 @@
-# Host-side unit tests for the HAL-free modules. Run from this directory: make
+# Тести на ПК для модулів без HAL. Запуск з цієї папки: make
 ifeq ($(origin CC),default)
 CC := gcc
 endif
@@ -13,8 +13,9 @@ endif
 
 TESTS := test_access_ctrl test_access_list test_joystick_math test_event_log test_timeutil
 
-test_access_ctrl_SRC   := ../App/Src/access_ctrl.c ../App/Src/menu.c
-test_access_list_SRC   := ../App/Src/access_list.c ../App/Src/crc32.c
+test_access_ctrl_SRC   := ../App/Src/access_ctrl.c ../App/Src/menu.c ../App/Src/access_list.c \
+                          ../App/Src/event_log.c ../App/Src/crc32.c fake_storage.c
+test_access_list_SRC   := ../App/Src/access_list.c ../App/Src/crc32.c fake_storage.c
 test_joystick_math_SRC := ../Drivers/BSP/joystick/joystick_math.c
 test_event_log_SRC     := ../App/Src/event_log.c
 test_timeutil_SRC      := ../App/Src/timeutil.c

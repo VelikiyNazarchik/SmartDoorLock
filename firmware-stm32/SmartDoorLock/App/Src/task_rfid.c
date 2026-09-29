@@ -7,8 +7,6 @@
 #include "logger.h"
 #include "supervisor.h"
 
-/* tRfid: sole owner of SPI1 and the RC522. Reports cards and reader health to tCtrl. */
-
 _Static_assert(RC522_UID_MAX == UID_MAX_LEN, "UID sizes must match");
 
 static RC522_Handle s_rc;
@@ -106,8 +104,8 @@ void TaskRfid(void *arg)
         AppEvent ev;
         memset(&ev, 0, sizeof(ev));
         ev.type = EV_CARD;
-        memcpy(ev.card.uid, uid.uid, uid.len);
-        ev.card.len = uid.len;
+        memcpy(ev.uid, uid.uid, uid.len);
+        ev.uid_len = uid.len;
         if (!App_PostCtrl(&ev)) {
             LOG_WARN("ctrl queue full, card dropped");
         }

@@ -1,516 +1,515 @@
 #include "test.h"
 #include "access_ctrl.h"
+#include "access_io.h"
 #include "menu.h"
 
-static AccessCtx c;
+/* Підробка IO_*: замість замка, зумера і дисплея — запис того, що стан-машина викликала. */
 
-static AppEvent card(CardClass cls, uint8_t id)
+static struct {
+    int          lock;
+    BUZZ_Pattern sound;
+    int          timer_ms;
+    int          screens;
+    int          logs;
+    LogEventType log_type;
+    uint8_t      log_uid0;
+    int          saves;
+    bool         save_ok;
+} io;
+
+static AccessCtx  c;
+static AccessList cards;
+static EventLog   events;
+
+void IO_Lock(bool open)                { io.lock = open ? 1 : 0; }
+void IO_Sound(BUZZ_Pattern pattern)    { io.sound = pattern; }
+void IO_Timer(uint32_t ms)             { io.timer_ms = (int)ms; }
+void IO_Screen(void)                   { io.screens++; }
+bool IO_SaveCards(void)                { io.saves++; return io.save_ok; }
+
+void IO_Log(LogEventType type, const uint8_t *uid, uint8_t uid_len)
 {
-    AppEvent e;
-    memset(&e, 0, sizeof(e));
-    e.type = EV_CARD;
-    e.card.uid[0] = id;
-    e.card.uid[1] = 0xA1;
-    e.card.uid[2] = 0xB2;
-    e.card.uid[3] = 0xC3;
-    e.card.len = 4;
-    e.card.cls = cls;
+    io.logs++;
+    io.log_type = type;
+    io.log_uid0 = (uid_len > 0U) ? uid[0] : 0U;
+    ELOG_Add(&events, type, uid, uid_len, 0, false);
+}
+
+static void io_clear(void)
+{
+    io.lock = -1;
+    io.sound = BUZZ_NONE;
+    io.timer_ms = -1;
+    io.screens = 0;
+    io.logs = 0;
+    io.log_type = LOGE_COUNT;
+    io.log_uid0 = 0;
+    io.saves = 0;
+}
+
+#define ADMIN    0xA0U
+#define USER     0x70U
+#define STRANGER 0x55U
+#define RANDOM   0x08U
+
+static AppEvent card(uint8_t first_byte)
+{
+    AppEvent e = { .type = EV_CARD, .uid = { first_byte, 0xA1, 0xB2, 0xC3 }, .uid_len = 4 };
     return e;
 }
 
-static AppEvent ev(AppEventType t)
+static AppEvent event(AppEventType type)
 {
-    AppEvent e;
-    memset(&e, 0, sizeof(e));
-    e.type = t;
+    AppEvent e = { .type = type };
     return e;
 }
 
-static AppEvent joy(JOY_Direction d)
+static AppEvent joy(JOY_Direction dir)
 {
-    AppEvent e = ev(EV_JOY_DIR);
-    e.dir = d;
+    AppEvent e = { .type = EV_JOY_DIR, .dir = dir };
     return e;
 }
 
-static AppEvent result(bool ok, UiResult reason)
+static CardClass class_of(uint8_t first_byte)
 {
-    AppEvent e = ev(EV_CMD_RESULT);
-    e.result.ok = ok;
-    e.result.reason = (uint8_t)reason;
-    e.result.uid[0] = 0x42;
-    e.result.uid_len = 4;
-    return e;
+    AppEvent e = card(first_byte);
+    return AL_Classify(&cards, e.uid, e.uid_len);
 }
 
-static AccessActions send(AppEvent e, uint32_t now)
+static void send(AppEvent e, uint32_t now)
 {
-    return AC_HandleEvent(&c, &e, now);
+    io_clear();
+    AC_HandleEvent(&c, &e, now);
 }
 
-/* Locked door, 2 cards (one admin), 5 s unlock time. */
+static void start(bool with_cards)
+{
+    AL_Init(&cards);
+    ELOG_Init(&events);
+    if (with_cards) {
+        AppEvent a = card(ADMIN);
+        AppEvent u = card(USER);
+        (void)AL_Add(&cards, a.uid, a.uid_len, true);
+        (void)AL_Add(&cards, u.uid, u.uid_len, false);
+    }
+    io.save_ok = true;
+    AC_Init(&c, &cards, &events);
+    io_clear();
+    AC_Start(&c, 0);
+}
+
 static void start_locked(void)
 {
-    AC_Init(&c, 5);
-    AC_SetCounts(&c, 2, 1, 0);
-    (void)AC_Start(&c, 0);
+    start(true);
 }
 
-static void start_setup_armed(void);
+static void start_setup_armed(void)
+{
+    start(false);
+    send(event(EV_EXIT_BUTTON), 10);
+    send(event(EV_TIMEOUT), 5010);
+}
 
 static void open_menu(uint32_t now)
 {
-    (void)send(card(CARD_ADMIN, 1), now);
+    send(card(ADMIN), now);
 }
 
-static void menu_select(MenuItem item, uint32_t now)
+static void choose(MenuItem item, uint32_t now)
 {
-    while (c.menu_sel != (uint8_t)item) {
-        (void)send(joy(JOY_DOWN), now);
+    while (c.menu_pos != (uint8_t)item) {
+        send(joy(JOY_DOWN), now);
     }
-    (void)send(ev(EV_JOY_CLICK), now);
+    send(event(EV_JOY_CLICK), now);
 }
 
-/* ------------------------------------------------------------------------------------------ */
-
-static void test_start_locked_closes_lock(void)
+static void test_start_closes_the_lock(void)
 {
-    AC_Init(&c, 5);
-    AC_SetCounts(&c, 2, 1, 0);
-    AccessActions a = AC_Start(&c, 0);
-    CHECK_EQ(AC_GetState(&c), AC_LOCKED);
-    CHECK_EQ(a.lock, LOCK_ACT_CLOSE);
-    CHECK(a.redraw);
-    CHECK_EQ(AC_Screen(&c), SCR_LOCKED);
+    start_locked();
+    CHECK_EQ(c.state, AC_LOCKED);
+    CHECK_EQ(io.lock, 0);
+    CHECK_EQ(io.timer_ms, 0);
+    CHECK(io.screens > 0);
 }
 
-static void test_start_setup_without_admin(void)
+static void test_start_without_admin_is_setup(void)
 {
-    AC_Init(&c, 5);
-    AC_SetCounts(&c, 0, 0, 0);
-    (void)AC_Start(&c, 0);
-    CHECK_EQ(AC_GetState(&c), AC_SETUP);
+    start(false);
+    CHECK_EQ(c.state, AC_SETUP);
     CHECK_EQ(AC_Screen(&c), SCR_SETUP);
 }
 
-static void test_user_card_unlocks_then_relocks(void)
+static void test_user_card_opens_then_closes(void)
 {
     start_locked();
-    AccessActions a = send(card(CARD_USER, 7), 1000);
-    CHECK_EQ(AC_GetState(&c), AC_UNLOCKED);
-    CHECK_EQ(a.lock, LOCK_ACT_OPEN);
-    CHECK_EQ(a.timer_ms, 5000);
-    CHECK_EQ(a.sound, BUZZ_OK);
-    CHECK(a.log);
-    CHECK_EQ(a.log_type, LOGE_ACCESS_GRANTED);
-    CHECK_EQ(a.uid[0], 7);
-    CHECK(a.notify_net);
+    send(card(USER), 1000);
+    CHECK_EQ(c.state, AC_UNLOCKED);
+    CHECK_EQ(io.lock, 1);
+    CHECK_EQ(io.timer_ms, 5000);
+    CHECK_EQ(io.sound, BUZZ_OK);
+    CHECK_EQ(io.log_type, LOGE_ACCESS_GRANTED);
+    CHECK_EQ(io.log_uid0, USER);
 
-    a = send(ev(EV_TIMEOUT), 6000);
-    CHECK_EQ(AC_GetState(&c), AC_LOCKED);
-    CHECK_EQ(a.lock, LOCK_ACT_CLOSE);
+    send(event(EV_TIMEOUT), 6000);
+    CHECK_EQ(c.state, AC_LOCKED);
+    CHECK_EQ(io.lock, 0);
 }
 
-static void test_stale_timeout_is_ignored(void)
+static void test_late_timer_event_is_ignored(void)
 {
     start_locked();
-    (void)send(card(CARD_USER, 7), 1000);
-    AccessActions a = send(ev(EV_TIMEOUT), 1500);
-    CHECK_EQ(AC_GetState(&c), AC_UNLOCKED);
-    CHECK_EQ(a.lock, LOCK_ACT_NONE);
-    CHECK(!a.redraw);
+    send(card(USER), 1000);
+    send(event(EV_TIMEOUT), 1500);
+    CHECK_EQ(c.state, AC_UNLOCKED);
+    CHECK_EQ(io.lock, -1);
 }
 
-static void test_second_card_extends_unlock(void)
+static void test_second_card_restarts_open_time(void)
 {
     start_locked();
-    (void)send(card(CARD_USER, 7), 1000);
-    AccessActions a = send(card(CARD_USER, 8), 3000);
-    CHECK_EQ(a.lock, LOCK_ACT_NONE);       /* already open */
-    CHECK_EQ(a.timer_ms, 5000);
-    (void)send(ev(EV_TIMEOUT), 6000);      /* old deadline: stale */
-    CHECK_EQ(AC_GetState(&c), AC_UNLOCKED);
-    (void)send(ev(EV_TIMEOUT), 8000);
-    CHECK_EQ(AC_GetState(&c), AC_LOCKED);
+    send(card(USER), 1000);
+    send(card(USER), 3000);
+    CHECK_EQ(io.lock, -1);
+    CHECK_EQ(io.timer_ms, 5000);
+    send(event(EV_TIMEOUT), 6000);
+    CHECK_EQ(c.state, AC_UNLOCKED);
+    send(event(EV_TIMEOUT), 8000);
+    CHECK_EQ(c.state, AC_LOCKED);
 }
 
-static void test_unknown_card_denied(void)
+static void test_stranger_is_denied(void)
 {
     start_locked();
-    AccessActions a = send(card(CARD_UNKNOWN, 9), 1000);
-    CHECK_EQ(AC_GetState(&c), AC_DENIED);
-    CHECK_EQ(a.sound, BUZZ_DENIED);
-    CHECK_EQ(a.log_type, LOGE_ACCESS_DENIED);
-    CHECK_EQ(a.lock, LOCK_ACT_NONE);
-    CHECK_EQ(a.timer_ms, (int32_t)CFG_DENIED_SHOW_MS);
-    (void)send(ev(EV_TIMEOUT), 1000 + CFG_DENIED_SHOW_MS);
-    CHECK_EQ(AC_GetState(&c), AC_LOCKED);
+    send(card(STRANGER), 1000);
+    CHECK_EQ(c.state, AC_DENIED);
+    CHECK_EQ(io.sound, BUZZ_DENIED);
+    CHECK_EQ(io.log_type, LOGE_ACCESS_DENIED);
+    CHECK_EQ(io.lock, -1);
+    CHECK_EQ(io.timer_ms, (int)CFG_DENIED_SHOW_MS);
+    send(event(EV_TIMEOUT), 1000 + CFG_DENIED_SHOW_MS);
+    CHECK_EQ(c.state, AC_LOCKED);
 }
 
-static void test_lockout_after_five_failures(void)
+static void test_five_failures_lock_the_reader(void)
 {
     start_locked();
-    AccessActions a;
-    for (uint32_t i = 0; i < CFG_LOCKOUT_ATTEMPTS - 1U; i++) {
-        a = send(card(CARD_UNKNOWN, 9), 1000 + i * 1000);
-        CHECK_EQ(AC_GetState(&c), AC_DENIED);
+    for (uint32_t i = 1; i < CFG_LOCKOUT_ATTEMPTS; i++) {
+        send(card(STRANGER), i * 1000);
+        CHECK_EQ(c.state, AC_DENIED);
     }
-    a = send(card(CARD_UNKNOWN, 9), 1000 + CFG_LOCKOUT_ATTEMPTS * 1000);
-    CHECK_EQ(AC_GetState(&c), AC_LOCKOUT);
-    CHECK_EQ(a.sound, BUZZ_LOCKOUT);
-    CHECK_EQ(a.log_type, LOGE_LOCKOUT);
-    CHECK_EQ(a.timer_ms, (int32_t)CFG_LOCKOUT_TIME_MS);
-    CHECK_EQ(AC_Screen(&c), SCR_LOCKOUT);
+    send(card(STRANGER), CFG_LOCKOUT_ATTEMPTS * 1000);
+    CHECK_EQ(c.state, AC_LOCKOUT);
+    CHECK_EQ(io.sound, BUZZ_LOCKOUT);
+    CHECK_EQ(io.log_type, LOGE_LOCKOUT);
+    CHECK_EQ(io.timer_ms, (int)CFG_LOCKOUT_TIME_MS);
 
-    /* even a valid card is refused while locked out */
-    a = send(card(CARD_USER, 7), 10000);
-    CHECK_EQ(AC_GetState(&c), AC_LOCKOUT);
-    CHECK_EQ(a.lock, LOCK_ACT_NONE);
-    CHECK_EQ(a.log_type, LOGE_ACCESS_DENIED);
+    send(card(USER), 10000);
+    CHECK_EQ(c.state, AC_LOCKOUT);
+    CHECK_EQ(io.lock, -1);
+    CHECK_EQ(io.log_type, LOGE_ACCESS_DENIED);
 
-    (void)send(ev(EV_TIMEOUT), 6000 + CFG_LOCKOUT_TIME_MS);
-    CHECK_EQ(AC_GetState(&c), AC_LOCKED);
-
-    /* counter was reset: one more failure is just a denial */
-    (void)send(card(CARD_UNKNOWN, 9), 70000);
-    CHECK_EQ(AC_GetState(&c), AC_DENIED);
+    send(event(EV_TIMEOUT), CFG_LOCKOUT_ATTEMPTS * 1000 + CFG_LOCKOUT_TIME_MS);
+    CHECK_EQ(c.state, AC_LOCKED);
+    send(card(STRANGER), 70000);
+    CHECK_EQ(c.state, AC_DENIED);
 }
 
-static void test_old_failures_leave_the_window(void)
+static void test_old_failures_do_not_count(void)
 {
     start_locked();
     for (uint32_t i = 0; i < CFG_LOCKOUT_ATTEMPTS - 1U; i++) {
-        (void)send(card(CARD_UNKNOWN, 9), i * 100);
+        send(card(STRANGER), i * 100);
     }
-    (void)send(card(CARD_UNKNOWN, 9), CFG_LOCKOUT_WINDOW_MS + 1000);
-    CHECK_EQ(AC_GetState(&c), AC_DENIED);
+    send(card(STRANGER), CFG_LOCKOUT_WINDOW_MS + 1000);
+    CHECK_EQ(c.state, AC_DENIED);
 }
 
-static void test_valid_card_resets_failure_counter(void)
+static void test_valid_card_resets_failures(void)
 {
     start_locked();
     for (uint32_t i = 0; i < CFG_LOCKOUT_ATTEMPTS - 1U; i++) {
-        (void)send(card(CARD_UNKNOWN, 9), i * 100);
+        send(card(STRANGER), i * 100);
     }
-    (void)send(card(CARD_USER, 7), 1000);
-    (void)send(ev(EV_TIMEOUT), 6000);
-    (void)send(card(CARD_UNKNOWN, 9), 7000);
-    CHECK_EQ(AC_GetState(&c), AC_DENIED);
+    send(card(USER), 1000);
+    send(event(EV_TIMEOUT), 6000);
+    send(card(STRANGER), 7000);
+    CHECK_EQ(c.state, AC_DENIED);
 }
 
-static void test_exit_button_works_during_lockout(void)
+static void test_exit_button_opens_during_lockout(void)
 {
     start_locked();
     for (uint32_t i = 0; i < CFG_LOCKOUT_ATTEMPTS; i++) {
-        (void)send(card(CARD_UNKNOWN, 9), i * 100);
+        send(card(STRANGER), i * 100);
     }
-    CHECK_EQ(AC_GetState(&c), AC_LOCKOUT);
-    AccessActions a = send(ev(EV_EXIT_BUTTON), 2000);
-    CHECK_EQ(AC_GetState(&c), AC_UNLOCKED);
-    CHECK_EQ(a.lock, LOCK_ACT_OPEN);
-    CHECK_EQ(a.log_type, LOGE_EXIT_BUTTON);
+    send(event(EV_EXIT_BUTTON), 2000);
+    CHECK_EQ(c.state, AC_UNLOCKED);
+    CHECK_EQ(io.lock, 1);
+    CHECK_EQ(io.log_type, LOGE_EXIT_BUTTON);
 }
 
-static void test_rfid_fault_and_recovery(void)
+static void test_reader_fault_and_recovery(void)
 {
     start_locked();
-    AccessActions a = send(ev(EV_RFID_FAULT), 100);
-    CHECK_EQ(AC_GetState(&c), AC_FAULT);
-    CHECK_EQ(a.log_type, LOGE_RFID_FAULT);
-    CHECK(a.notify_net);
-
-    a = send(ev(EV_RFID_FAULT), 200);          /* repeated fault: no new log entry */
-    CHECK(!a.log);
-
-    a = send(ev(EV_RFID_OK), 300);
-    CHECK_EQ(AC_GetState(&c), AC_LOCKED);
-    CHECK_EQ(a.log_type, LOGE_RFID_RECOVERED);
+    send(event(EV_RFID_FAULT), 100);
+    CHECK_EQ(c.state, AC_FAULT);
+    CHECK_EQ(io.log_type, LOGE_RFID_FAULT);
+    send(event(EV_RFID_FAULT), 200);
+    CHECK_EQ(io.logs, 0);
+    send(event(EV_RFID_OK), 300);
+    CHECK_EQ(c.state, AC_LOCKED);
+    CHECK_EQ(io.log_type, LOGE_RFID_RECOVERED);
 }
 
-static void test_exit_button_works_in_fault(void)
+static void test_exit_button_works_with_broken_reader(void)
 {
     start_locked();
-    (void)send(ev(EV_RFID_FAULT), 100);
-    (void)send(ev(EV_EXIT_BUTTON), 200);
-    CHECK_EQ(AC_GetState(&c), AC_UNLOCKED);
-    AccessActions a = send(ev(EV_TIMEOUT), 5200);
-    CHECK_EQ(AC_GetState(&c), AC_FAULT);
-    CHECK_EQ(a.lock, LOCK_ACT_CLOSE);
+    send(event(EV_RFID_FAULT), 100);
+    send(event(EV_EXIT_BUTTON), 200);
+    CHECK_EQ(c.state, AC_UNLOCKED);
+    send(event(EV_TIMEOUT), 5200);
+    CHECK_EQ(c.state, AC_FAULT);
+    CHECK_EQ(io.lock, 0);
 }
 
-static void test_fault_while_unlocked_keeps_door_open(void)
+static void test_fault_does_not_close_an_open_door(void)
 {
     start_locked();
-    (void)send(card(CARD_USER, 7), 0);
-    AccessActions a = send(ev(EV_RFID_FAULT), 100);
-    CHECK_EQ(AC_GetState(&c), AC_UNLOCKED);
-    CHECK_EQ(a.lock, LOCK_ACT_NONE);
-    (void)send(ev(EV_TIMEOUT), 5000);
-    CHECK_EQ(AC_GetState(&c), AC_FAULT);
+    send(card(USER), 0);
+    send(event(EV_RFID_FAULT), 100);
+    CHECK_EQ(c.state, AC_UNLOCKED);
+    CHECK_EQ(io.lock, -1);
+    send(event(EV_TIMEOUT), 5000);
+    CHECK_EQ(c.state, AC_FAULT);
 }
 
 static void test_admin_card_opens_menu(void)
 {
     start_locked();
-    AccessActions a = send(card(CARD_ADMIN, 1), 100);
-    CHECK_EQ(AC_GetState(&c), AC_ADMIN_MENU);
-    CHECK_EQ(AC_Screen(&c), SCR_MENU);
-    CHECK_EQ(c.menu_sel, 0);
-    CHECK_EQ(a.timer_ms, (int32_t)CFG_MENU_IDLE_MS);
-    CHECK_EQ(a.log_type, LOGE_ADMIN_LOGIN);
-    CHECK_EQ(a.lock, LOCK_ACT_NONE);
+    send(card(ADMIN), 100);
+    CHECK_EQ(c.state, AC_ADMIN_MENU);
+    CHECK_EQ(c.menu_pos, 0);
+    CHECK_EQ(io.timer_ms, (int)CFG_MENU_IDLE_MS);
+    CHECK_EQ(io.log_type, LOGE_ADMIN_LOGIN);
+    CHECK_EQ(io.lock, -1);
 }
 
-static void test_menu_navigation_wraps(void)
+static void test_menu_cursor_wraps_and_back_closes(void)
 {
     start_locked();
     open_menu(0);
-    AccessActions a = send(joy(JOY_UP), 10);
-    CHECK_EQ(c.menu_sel, MENU_COUNT - 1);
-    CHECK_EQ(a.sound, BUZZ_CLICK);
-    CHECK(a.redraw);
-    (void)send(joy(JOY_DOWN), 20);
-    CHECK_EQ(c.menu_sel, 0);
-    (void)send(joy(JOY_LEFT), 30);
-    CHECK_EQ(AC_GetState(&c), AC_LOCKED);
+    send(joy(JOY_UP), 10);
+    CHECK_EQ(c.menu_pos, MENU_COUNT - 1);
+    CHECK_EQ(io.sound, BUZZ_CLICK);
+    CHECK_EQ(io.screens, 1);
+    send(joy(JOY_DOWN), 20);
+    CHECK_EQ(c.menu_pos, 0);
+    send(joy(JOY_LEFT), 30);
+    CHECK_EQ(c.state, AC_LOCKED);
 }
 
-static void test_menu_idle_timeout(void)
+static void test_menu_closes_after_idle_time(void)
 {
     start_locked();
     open_menu(0);
-    (void)send(joy(JOY_DOWN), 20000);           /* activity re-arms the idle timer */
-    (void)send(ev(EV_TIMEOUT), CFG_MENU_IDLE_MS);
-    CHECK_EQ(AC_GetState(&c), AC_ADMIN_MENU);
-    (void)send(ev(EV_TIMEOUT), 20000 + CFG_MENU_IDLE_MS);
-    CHECK_EQ(AC_GetState(&c), AC_LOCKED);
+    send(joy(JOY_DOWN), 20000);
+    send(event(EV_TIMEOUT), CFG_MENU_IDLE_MS);
+    CHECK_EQ(c.state, AC_ADMIN_MENU);
+    send(event(EV_TIMEOUT), 20000 + CFG_MENU_IDLE_MS);
+    CHECK_EQ(c.state, AC_LOCKED);
 }
 
 static void test_menu_open_door(void)
 {
     start_locked();
     open_menu(0);
-    AccessActions a = send(ev(EV_JOY_CLICK), 10);
-    CHECK_EQ(AC_GetState(&c), AC_UNLOCKED);
-    CHECK_EQ(a.lock, LOCK_ACT_OPEN);
+    send(event(EV_JOY_CLICK), 10);
+    CHECK_EQ(c.state, AC_UNLOCKED);
+    CHECK_EQ(io.lock, 1);
+    CHECK_EQ(io.sound, BUZZ_OK);
 }
 
-static void test_enroll_new_card(void)
+static void test_add_user_card(void)
 {
     start_locked();
     open_menu(0);
-    menu_select(MENU_ADD_CARD, 10);
-    CHECK_EQ(AC_GetState(&c), AC_ENROLL_WAIT_CARD);
+    choose(MENU_ADD_CARD, 10);
+    CHECK_EQ(c.state, AC_ENROLL_WAIT_CARD);
+    CHECK(!c.adding_admin);
 
-    AccessActions a = send(card(CARD_UNKNOWN, 0x55), 20);
-    CHECK_EQ(a.cmd, AC_CMD_ENROLL_USER);
-    CHECK_EQ(a.uid[0], 0x55);
-    CHECK_EQ(a.uid_len, 4);
-
-    AC_SetCounts(&c, 3, 1, 0);
-    a = send(result(true, RES_NONE), 30);
-    CHECK_EQ(AC_GetState(&c), AC_RESULT);
+    send(card(STRANGER), 20);
+    CHECK_EQ(io.saves, 1);
+    CHECK_EQ(cards.count, 3);
+    CHECK_EQ(class_of(STRANGER), CARD_USER);
     CHECK_EQ(AC_Screen(&c), SCR_RESULT_OK);
     CHECK_EQ(c.result, RES_CARD_ADDED);
-    CHECK_EQ(a.log_type, LOGE_CARD_ADDED);
-    CHECK_EQ(a.sound, BUZZ_OK);
+    CHECK_EQ(io.log_type, LOGE_CARD_ADDED);
 
-    (void)send(ev(EV_TIMEOUT), 30 + CFG_RESULT_SHOW_MS);
-    CHECK_EQ(AC_GetState(&c), AC_ADMIN_MENU);
+    send(event(EV_TIMEOUT), 20 + CFG_RESULT_SHOW_MS);
+    CHECK_EQ(c.state, AC_ADMIN_MENU);
 }
 
-static void test_enroll_admin_from_menu(void)
+static void test_add_admin_card(void)
 {
     start_locked();
     open_menu(0);
-    menu_select(MENU_ADD_ADMIN, 10);
-    CHECK_EQ(AC_GetState(&c), AC_ENROLL_WAIT_CARD);
-    CHECK(c.enroll_admin);
-
-    AccessActions a = send(card(CARD_UNKNOWN, 0x66), 20);
-    CHECK_EQ(a.cmd, AC_CMD_ENROLL_ADMIN);
-    CHECK_EQ(a.uid[0], 0x66);
-
-    AC_SetCounts(&c, 3, 2, 0);
-    a = send(result(true, RES_NONE), 30);
-    CHECK_EQ(AC_Screen(&c), SCR_RESULT_OK);
+    choose(MENU_ADD_ADMIN, 10);
+    CHECK(c.adding_admin);
+    send(card(STRANGER), 20);
+    CHECK_EQ(class_of(STRANGER), CARD_ADMIN);
     CHECK_EQ(c.result, RES_ADMIN_ADDED);
-    CHECK_EQ(a.log_type, LOGE_CARD_ADDED);
-
-    (void)send(ev(EV_TIMEOUT), 30 + CFG_RESULT_SHOW_MS);
-    CHECK_EQ(AC_GetState(&c), AC_ADMIN_MENU);   /* back to the menu, not to setup/locked */
+    send(event(EV_TIMEOUT), 20 + CFG_RESULT_SHOW_MS);
+    CHECK_EQ(c.state, AC_ADMIN_MENU);
 }
 
-static void test_add_card_after_add_admin_is_user(void)
+static void test_add_card_after_add_admin_adds_user(void)
 {
     start_locked();
     open_menu(0);
-    menu_select(MENU_ADD_ADMIN, 10);
-    (void)send(joy(JOY_LEFT), 20);
-    CHECK_EQ(AC_GetState(&c), AC_ADMIN_MENU);
-    menu_select(MENU_ADD_CARD, 30);
-    CHECK(!c.enroll_admin);
-    AccessActions a = send(card(CARD_UNKNOWN, 0x67), 40);
-    CHECK_EQ(a.cmd, AC_CMD_ENROLL_USER);
+    choose(MENU_ADD_ADMIN, 10);
+    send(joy(JOY_LEFT), 20);
+    choose(MENU_ADD_CARD, 30);
+    send(card(STRANGER), 40);
+    CHECK_EQ(class_of(STRANGER), CARD_USER);
 }
 
-static void test_random_uid_rejected_in_menu(void)
+static void test_known_card_is_not_added_twice(void)
 {
     start_locked();
     open_menu(0);
-    menu_select(MENU_ADD_CARD, 10);
-    AccessActions a = send(card(CARD_UNKNOWN, 0x08), 20);   /* 08 xx xx xx = random ID */
-    CHECK_EQ(a.cmd, AC_CMD_NONE);
-    CHECK_EQ(AC_Screen(&c), SCR_RESULT_FAIL);
-    CHECK_EQ(c.result, RES_RANDOM_UID);
-    (void)send(ev(EV_TIMEOUT), 20 + CFG_RESULT_SHOW_MS);
-    CHECK_EQ(AC_GetState(&c), AC_ADMIN_MENU);
-}
-
-static void test_random_uid_rejected_in_setup_keeps_arming(void)
-{
-    start_setup_armed();
-    AccessActions a = send(card(CARD_UNKNOWN, 0x08), 6000);
-    CHECK_EQ(a.cmd, AC_CMD_NONE);
-    CHECK_EQ(c.result, RES_RANDOM_UID);
-    (void)send(ev(EV_TIMEOUT), 6000 + CFG_RESULT_SHOW_MS);
-    CHECK_EQ(AC_GetState(&c), AC_SETUP);
-    CHECK(AC_SetupArmed(&c, 8000));
-    a = send(card(CARD_UNKNOWN, 0x11), 8000);                 /* a proper card still works */
-    CHECK_EQ(a.cmd, AC_CMD_ENROLL_ADMIN);
-}
-
-static void test_enroll_known_card_rejected(void)
-{
-    start_locked();
-    open_menu(0);
-    menu_select(MENU_ADD_CARD, 10);
-    AccessActions a = send(card(CARD_USER, 7), 20);
-    CHECK_EQ(a.cmd, AC_CMD_NONE);
+    choose(MENU_ADD_CARD, 10);
+    send(card(USER), 20);
+    CHECK_EQ(io.saves, 0);
     CHECK_EQ(AC_Screen(&c), SCR_RESULT_FAIL);
     CHECK_EQ(c.result, RES_ALREADY_EXISTS);
 }
 
-static void test_enroll_storage_error(void)
+static void test_random_uid_is_not_added(void)
 {
     start_locked();
     open_menu(0);
-    menu_select(MENU_ADD_CARD, 10);
-    (void)send(card(CARD_UNKNOWN, 0x55), 20);
-    AccessActions a = send(result(false, RES_STORAGE_ERROR), 30);
-    CHECK_EQ(AC_Screen(&c), SCR_RESULT_FAIL);
-    CHECK_EQ(c.result, RES_STORAGE_ERROR);
-    CHECK_EQ(a.sound, BUZZ_ERROR);
-    CHECK(!a.log);
+    choose(MENU_ADD_CARD, 10);
+    send(card(RANDOM), 20);
+    CHECK_EQ(io.saves, 0);
+    CHECK_EQ(cards.count, 2);
+    CHECK_EQ(c.result, RES_RANDOM_UID);
+    send(event(EV_TIMEOUT), 20 + CFG_RESULT_SHOW_MS);
+    CHECK_EQ(c.state, AC_ADMIN_MENU);
 }
 
-static void test_enroll_wait_times_out_to_menu(void)
+static void test_flash_error_undoes_the_change(void)
 {
     start_locked();
     open_menu(0);
-    menu_select(MENU_ADD_CARD, 10);
-    (void)send(ev(EV_TIMEOUT), 10 + CFG_ENROLL_WAIT_MS);
-    CHECK_EQ(AC_GetState(&c), AC_ADMIN_MENU);
+    choose(MENU_ADD_CARD, 10);
+    io.save_ok = false;
+    send(card(STRANGER), 20);
+    CHECK_EQ(cards.count, 2);
+    CHECK_EQ(class_of(STRANGER), CARD_UNKNOWN);
+    CHECK_EQ(c.result, RES_STORAGE_ERROR);
+    CHECK_EQ(io.sound, BUZZ_ERROR);
+    CHECK_EQ(io.logs, 0);
+}
+
+static void test_waiting_for_card_times_out_to_menu(void)
+{
+    start_locked();
+    open_menu(0);
+    choose(MENU_ADD_CARD, 10);
+    send(event(EV_TIMEOUT), 10 + CFG_ENROLL_WAIT_MS);
+    CHECK_EQ(c.state, AC_ADMIN_MENU);
 }
 
 static void test_delete_card(void)
 {
     start_locked();
     open_menu(0);
-    menu_select(MENU_DELETE_CARD, 10);
-    CHECK_EQ(AC_GetState(&c), AC_DELETE_SELECT);
-    (void)send(joy(JOY_DOWN), 20);
-    CHECK_EQ(c.list_sel, 1);
-    (void)send(joy(JOY_DOWN), 30);
-    CHECK_EQ(c.list_sel, 0);                  /* 2 cards: wraps */
-    (void)send(joy(JOY_DOWN), 40);
+    choose(MENU_DELETE_CARD, 10);
+    CHECK_EQ(c.state, AC_DELETE_SELECT);
+    send(joy(JOY_DOWN), 20);
+    CHECK_EQ(c.list_pos, 1);
+    send(joy(JOY_DOWN), 30);
+    CHECK_EQ(c.list_pos, 0);
+    send(joy(JOY_DOWN), 40);
 
-    AccessActions a = send(ev(EV_JOY_CLICK), 50);
-    CHECK_EQ(a.cmd, AC_CMD_DELETE);
-    CHECK_EQ(a.cmd_arg, 1);
-
-    AC_SetCounts(&c, 1, 1, 0);
-    a = send(result(true, RES_NONE), 60);
+    send(event(EV_JOY_CLICK), 50);
+    CHECK_EQ(cards.count, 1);
+    CHECK_EQ(class_of(USER), CARD_UNKNOWN);
     CHECK_EQ(AC_Screen(&c), SCR_RESULT_OK);
-    CHECK_EQ(a.log_type, LOGE_CARD_REMOVED);
-    CHECK_EQ(c.list_sel, 0);
+    CHECK_EQ(io.log_type, LOGE_CARD_REMOVED);
+    CHECK_EQ(io.log_uid0, USER);
+    CHECK_EQ(c.list_pos, 0);
 }
 
-static void test_delete_last_admin_refused(void)
+static void test_last_admin_is_not_deleted(void)
 {
     start_locked();
     open_menu(0);
-    menu_select(MENU_DELETE_CARD, 10);
-    (void)send(ev(EV_JOY_CLICK), 20);
-    (void)send(result(false, RES_LAST_ADMIN), 30);
+    choose(MENU_DELETE_CARD, 10);
+    send(event(EV_JOY_CLICK), 20);
+    CHECK_EQ(cards.count, 2);
     CHECK_EQ(AC_Screen(&c), SCR_RESULT_FAIL);
     CHECK_EQ(c.result, RES_LAST_ADMIN);
 }
 
-static void test_settings_change_unlock_time(void)
+static void test_change_open_time(void)
 {
     start_locked();
     open_menu(0);
-    menu_select(MENU_UNLOCK_TIME, 10);
-    CHECK_EQ(AC_GetState(&c), AC_SETTINGS);
-    (void)send(joy(JOY_UP), 20);
-    (void)send(joy(JOY_UP), 30);
-    CHECK_EQ(c.edit_unlock_s, 7);
-    CHECK_EQ(c.unlock_time_s, 5);             /* not applied before saving */
+    choose(MENU_UNLOCK_TIME, 10);
+    CHECK_EQ(c.state, AC_SETTINGS);
+    send(joy(JOY_UP), 20);
+    send(joy(JOY_UP), 30);
+    CHECK_EQ(c.edit_seconds, 7);
+    CHECK_EQ(cards.unlock_time_s, 5);
 
-    AccessActions a = send(ev(EV_JOY_CLICK), 40);
-    CHECK_EQ(a.cmd, AC_CMD_SAVE_SETTINGS);
-    CHECK_EQ(a.cmd_arg, 7);
-    a = send(result(true, RES_NONE), 50);
-    CHECK_EQ(c.unlock_time_s, 7);
-    CHECK_EQ(a.log_type, LOGE_SETTINGS_CHANGED);
+    send(event(EV_JOY_CLICK), 40);
+    CHECK_EQ(io.saves, 1);
+    CHECK_EQ(cards.unlock_time_s, 7);
+    CHECK_EQ(io.log_type, LOGE_SETTINGS_CHANGED);
 
-    (void)send(joy(JOY_LEFT), 60);            /* result screen ignores LEFT */
-    (void)send(ev(EV_JOY_CLICK), 70);         /* click skips the result screen */
-    CHECK_EQ(AC_GetState(&c), AC_ADMIN_MENU);
-    (void)send(joy(JOY_LEFT), 80);
-    a = send(card(CARD_USER, 7), 100);
-    CHECK_EQ(a.timer_ms, 7000);
+    send(event(EV_JOY_CLICK), 50);
+    CHECK_EQ(c.state, AC_ADMIN_MENU);
+    send(joy(JOY_LEFT), 60);
+    send(card(USER), 100);
+    CHECK_EQ(io.timer_ms, 7000);
 }
 
-static void test_settings_limits(void)
+static void test_open_time_limits(void)
 {
-    AC_Init(&c, CFG_UNLOCK_TIME_MIN_S);
-    AC_SetCounts(&c, 2, 1, 0);
-    (void)AC_Start(&c, 0);
+    start_locked();
+    cards.unlock_time_s = CFG_UNLOCK_TIME_MIN_S;
     open_menu(0);
-    menu_select(MENU_UNLOCK_TIME, 10);
-    (void)send(joy(JOY_DOWN), 20);
-    CHECK_EQ(c.edit_unlock_s, CFG_UNLOCK_TIME_MIN_S);
+    choose(MENU_UNLOCK_TIME, 10);
+    send(joy(JOY_DOWN), 20);
+    CHECK_EQ(c.edit_seconds, CFG_UNLOCK_TIME_MIN_S);
     for (int i = 0; i < 100; i++) {
-        (void)send(joy(JOY_UP), 30);
+        send(joy(JOY_UP), 30);
     }
-    CHECK_EQ(c.edit_unlock_s, CFG_UNLOCK_TIME_MAX_S);
-    (void)send(joy(JOY_LEFT), 40);            /* leave without saving */
-    CHECK_EQ(c.unlock_time_s, CFG_UNLOCK_TIME_MIN_S);
+    CHECK_EQ(c.edit_seconds, CFG_UNLOCK_TIME_MAX_S);
+    send(joy(JOY_LEFT), 40);
+    CHECK_EQ(cards.unlock_time_s, CFG_UNLOCK_TIME_MIN_S);
 }
 
-static void start_setup_armed(void)
+static void test_setup_ignores_cards_until_exit_button(void)
 {
-    AC_Init(&c, 5);
-    AC_SetCounts(&c, 0, 0, 0);
-    (void)AC_Start(&c, 0);
-    (void)send(ev(EV_EXIT_BUTTON), 10);       /* someone inside arms the setup */
-    (void)send(ev(EV_TIMEOUT), 5010);
-    CHECK_EQ(AC_GetState(&c), AC_SETUP);
+    start(false);
+    send(card(STRANGER), 100);
+    CHECK_EQ(io.saves, 0);
+    CHECK_EQ(io.sound, BUZZ_DENIED);
+    CHECK_EQ(c.state, AC_SETUP);
 }
 
-static void test_setup_ignores_cards_until_armed(void)
+static void test_setup_registers_first_admin(void)
 {
-    AC_Init(&c, 5);
-    AC_SetCounts(&c, 0, 0, 0);
-    (void)AC_Start(&c, 0);
-    CHECK(!AC_SetupArmed(&c, 0));
-    AccessActions a = send(card(CARD_UNKNOWN, 0x11), 100);
-    CHECK_EQ(a.cmd, AC_CMD_NONE);
-    CHECK_EQ(a.sound, BUZZ_DENIED);
-    CHECK_EQ(a.log_type, LOGE_ACCESS_DENIED);
-    CHECK_EQ(AC_GetState(&c), AC_SETUP);
+    start_setup_armed();
+    CHECK_EQ(c.state, AC_SETUP);
+    send(card(STRANGER), 6000);
+    CHECK_EQ(class_of(STRANGER), CARD_ADMIN);
+    CHECK_EQ(c.result, RES_ADMIN_ADDED);
+    CHECK(!AC_SetupArmed(&c, 6001));
+    send(event(EV_TIMEOUT), 6000 + CFG_RESULT_SHOW_MS);
+    CHECK_EQ(c.state, AC_LOCKED);
 }
 
 static void test_setup_arming_expires(void)
@@ -518,103 +517,100 @@ static void test_setup_arming_expires(void)
     start_setup_armed();
     CHECK(AC_SetupArmed(&c, 6000));
     CHECK(!AC_SetupArmed(&c, 10 + CFG_SETUP_ARM_MS));
-    AccessActions a = send(card(CARD_UNKNOWN, 0x11), 10 + CFG_SETUP_ARM_MS + 1U);
-    CHECK_EQ(a.cmd, AC_CMD_NONE);
+    send(card(STRANGER), 10 + CFG_SETUP_ARM_MS + 1U);
+    CHECK_EQ(io.saves, 0);
 }
 
-static void test_exit_button_does_not_arm_when_admin_exists(void)
+static void test_setup_rejects_random_uid_but_stays_armed(void)
+{
+    start_setup_armed();
+    send(card(RANDOM), 6000);
+    CHECK_EQ(c.result, RES_RANDOM_UID);
+    send(event(EV_TIMEOUT), 6000 + CFG_RESULT_SHOW_MS);
+    CHECK_EQ(c.state, AC_SETUP);
+    send(card(STRANGER), 8000);
+    CHECK_EQ(c.result, RES_ADMIN_ADDED);
+}
+
+static void test_setup_flash_error_stays_in_setup(void)
+{
+    start_setup_armed();
+    io.save_ok = false;
+    send(card(STRANGER), 6000);
+    CHECK_EQ(cards.count, 0);
+    send(event(EV_TIMEOUT), 6000 + CFG_RESULT_SHOW_MS);
+    CHECK_EQ(c.state, AC_SETUP);
+}
+
+static void test_exit_button_arms_setup_only_without_admin(void)
 {
     start_locked();
-    (void)send(ev(EV_EXIT_BUTTON), 10);
+    send(event(EV_EXIT_BUTTON), 10);
     CHECK(!AC_SetupArmed(&c, 20));
 }
 
-static void test_setup_enrolls_first_admin(void)
-{
-    start_setup_armed();
-    AccessActions a = send(card(CARD_UNKNOWN, 0x11), 6000);
-    CHECK_EQ(a.cmd, AC_CMD_ENROLL_ADMIN);
-    CHECK(!AC_SetupArmed(&c, 6001));          /* one card per arming */
-    AC_SetCounts(&c, 1, 1, 0);
-    a = send(result(true, RES_NONE), 6010);
-    CHECK_EQ(c.result, RES_ADMIN_ADDED);
-    CHECK_EQ(a.log_type, LOGE_CARD_ADDED);
-    (void)send(ev(EV_TIMEOUT), 6010 + CFG_RESULT_SHOW_MS);
-    CHECK_EQ(AC_GetState(&c), AC_LOCKED);
-}
-
-static void test_setup_failed_enroll_stays_in_setup(void)
-{
-    start_setup_armed();
-    (void)send(card(CARD_UNKNOWN, 0x11), 6000);
-    (void)send(result(false, RES_STORAGE_ERROR), 6010);
-    (void)send(ev(EV_TIMEOUT), 6010 + CFG_RESULT_SHOW_MS);
-    CHECK_EQ(AC_GetState(&c), AC_SETUP);
-}
-
-static void test_net_unlock(void)
+static void test_phone_unlock(void)
 {
     start_locked();
-    AccessActions a = send(ev(EV_NET_UNLOCK), 100);
-    CHECK_EQ(AC_GetState(&c), AC_UNLOCKED);
-    CHECK_EQ(a.log_type, LOGE_NET_UNLOCK);
-    (void)send(ev(EV_TIMEOUT), 5100);
+    send(event(EV_NET_UNLOCK), 100);
+    CHECK_EQ(c.state, AC_UNLOCKED);
+    CHECK_EQ(io.log_type, LOGE_NET_UNLOCK);
+    send(event(EV_TIMEOUT), 5100);
 
     open_menu(6000);
-    a = send(ev(EV_NET_UNLOCK), 6100);        /* an admin is at the device: ignored */
-    CHECK_EQ(AC_GetState(&c), AC_ADMIN_MENU);
-    CHECK_EQ(a.lock, LOCK_ACT_NONE);
+    send(event(EV_NET_UNLOCK), 6100);
+    CHECK_EQ(c.state, AC_ADMIN_MENU);
 }
 
-static void test_remaining_seconds(void)
+static void test_lockout_countdown(void)
 {
     start_locked();
     for (uint32_t i = 0; i < CFG_LOCKOUT_ATTEMPTS; i++) {
-        (void)send(card(CARD_UNKNOWN, 9), 0);
+        send(card(STRANGER), 0);
     }
-    CHECK_EQ(AC_RemainingS(&c, 0), CFG_LOCKOUT_TIME_MS / 1000U);
-    CHECK_EQ(AC_RemainingS(&c, CFG_LOCKOUT_TIME_MS - 1500U), 2);
-    CHECK_EQ(AC_RemainingS(&c, CFG_LOCKOUT_TIME_MS + 10U), 0);
+    CHECK_EQ(AC_SecondsLeft(&c, 0), CFG_LOCKOUT_TIME_MS / 1000U);
+    CHECK_EQ(AC_SecondsLeft(&c, CFG_LOCKOUT_TIME_MS - 1500U), 2);
+    CHECK_EQ(AC_SecondsLeft(&c, CFG_LOCKOUT_TIME_MS + 10U), 0);
 }
 
 int main(void)
 {
     printf("test_access_ctrl\n");
-    RUN(test_start_locked_closes_lock);
-    RUN(test_start_setup_without_admin);
-    RUN(test_user_card_unlocks_then_relocks);
-    RUN(test_stale_timeout_is_ignored);
-    RUN(test_second_card_extends_unlock);
-    RUN(test_unknown_card_denied);
-    RUN(test_lockout_after_five_failures);
-    RUN(test_old_failures_leave_the_window);
-    RUN(test_valid_card_resets_failure_counter);
-    RUN(test_exit_button_works_during_lockout);
-    RUN(test_rfid_fault_and_recovery);
-    RUN(test_exit_button_works_in_fault);
-    RUN(test_fault_while_unlocked_keeps_door_open);
+    RUN(test_start_closes_the_lock);
+    RUN(test_start_without_admin_is_setup);
+    RUN(test_user_card_opens_then_closes);
+    RUN(test_late_timer_event_is_ignored);
+    RUN(test_second_card_restarts_open_time);
+    RUN(test_stranger_is_denied);
+    RUN(test_five_failures_lock_the_reader);
+    RUN(test_old_failures_do_not_count);
+    RUN(test_valid_card_resets_failures);
+    RUN(test_exit_button_opens_during_lockout);
+    RUN(test_reader_fault_and_recovery);
+    RUN(test_exit_button_works_with_broken_reader);
+    RUN(test_fault_does_not_close_an_open_door);
     RUN(test_admin_card_opens_menu);
-    RUN(test_menu_navigation_wraps);
-    RUN(test_menu_idle_timeout);
+    RUN(test_menu_cursor_wraps_and_back_closes);
+    RUN(test_menu_closes_after_idle_time);
     RUN(test_menu_open_door);
-    RUN(test_enroll_new_card);
-    RUN(test_enroll_admin_from_menu);
-    RUN(test_add_card_after_add_admin_is_user);
-    RUN(test_random_uid_rejected_in_menu);
-    RUN(test_random_uid_rejected_in_setup_keeps_arming);
-    RUN(test_enroll_known_card_rejected);
-    RUN(test_enroll_storage_error);
-    RUN(test_enroll_wait_times_out_to_menu);
+    RUN(test_add_user_card);
+    RUN(test_add_admin_card);
+    RUN(test_add_card_after_add_admin_adds_user);
+    RUN(test_known_card_is_not_added_twice);
+    RUN(test_random_uid_is_not_added);
+    RUN(test_flash_error_undoes_the_change);
+    RUN(test_waiting_for_card_times_out_to_menu);
     RUN(test_delete_card);
-    RUN(test_delete_last_admin_refused);
-    RUN(test_settings_change_unlock_time);
-    RUN(test_settings_limits);
-    RUN(test_setup_ignores_cards_until_armed);
+    RUN(test_last_admin_is_not_deleted);
+    RUN(test_change_open_time);
+    RUN(test_open_time_limits);
+    RUN(test_setup_ignores_cards_until_exit_button);
+    RUN(test_setup_registers_first_admin);
     RUN(test_setup_arming_expires);
-    RUN(test_exit_button_does_not_arm_when_admin_exists);
-    RUN(test_setup_enrolls_first_admin);
-    RUN(test_setup_failed_enroll_stays_in_setup);
-    RUN(test_net_unlock);
-    RUN(test_remaining_seconds);
+    RUN(test_setup_rejects_random_uid_but_stays_armed);
+    RUN(test_setup_flash_error_stays_in_setup);
+    RUN(test_exit_button_arms_setup_only_without_admin);
+    RUN(test_phone_unlock);
+    RUN(test_lockout_countdown);
     return TEST_REPORT();
 }

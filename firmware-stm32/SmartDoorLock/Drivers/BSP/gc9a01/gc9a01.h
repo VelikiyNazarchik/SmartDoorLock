@@ -31,13 +31,11 @@ typedef struct {
     volatile bool      dma_busy;
 } LCD_Handle;
 
-/* Hardware reset + vendor init sequence. Uses HAL_Delay: call from the owning task at start-up. */
 LCD_Status LCD_Init(LCD_Handle *h);
 LCD_Status LCD_SetWindow(LCD_Handle *h, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 /* Streams pixels into the current window. Data must already be big-endian RGB565
  * (high byte first on the wire). Uses DMA for large blocks when h->use_dma is set. */
 LCD_Status LCD_WritePixels(LCD_Handle *h, const uint16_t *px_be, uint32_t count);
-/* Call from HAL_SPI_TxCpltCallback for this SPI instance (interrupt context). */
 void       LCD_OnDmaComplete(LCD_Handle *h);
 
 static inline uint16_t LCD_Swap16(uint16_t c)

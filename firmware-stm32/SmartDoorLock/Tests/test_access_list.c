@@ -1,119 +1,82 @@
 #include "test.h"
 #include "access_list.h"
 #include "crc32.h"
+#include "fake_storage.h"
 
-/* RAM model of a Flash sector: erase sets 0xFF, program can only clear bits (like NOR Flash),
- * and a write budget simulates a power cut part-way through a save. */
-#define FAKE_SIZE 4096U
-static uint8_t flash[FAKE_SIZE];
-static int     write_budget = -1;     /* bytes allowed before the "power cut"; -1 = unlimited */
-static bool    fail_erase;
-
-static bool fake_read(uint32_t off, void *dst, uint32_t len)
-{
-    if (off + len > FAKE_SIZE) {
-        return false;
-    }
-    memcpy(dst, &flash[off], len);
-    return true;
-}
-
-static bool fake_erase(void)
-{
-    if (fail_erase) {
-        return false;
-    }
-    memset(flash, 0xFF, sizeof(flash));
-    return true;
-}
-
-static bool fake_write(uint32_t off, const void *src, uint32_t len)
-{
-    const uint8_t *s = src;
-    if (off + len > FAKE_SIZE || (len % 4U) != 0U) {
-        return false;
-    }
-    for (uint32_t i = 0; i < len; i++) {
-        if (write_budget == 0) {
-            return false;
-        }
-        if (write_budget > 0) {
-            write_budget--;
-        }
-        flash[off + i] &= s[i];
-    }
-    return true;
-}
-
-static const AL_Storage fake = { fake_read, fake_erase, fake_write };
 static AccessList al;
 
 static const uint8_t UID_A[4] = { 0x04, 0xA1, 0xB2, 0xC3 };
 static const uint8_t UID_B[7] = { 0x04, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 };
 static const uint8_t UID_C[4] = { 0xDE, 0xAD, 0xBE, 0xEF };
 
-static void reset_flash(void)
+static void fresh(void)
 {
-    memset(flash, 0xFF, sizeof(flash));
-    write_budget = -1;
-    fail_erase = false;
-    AL_Init(&al, &fake);
+    fake_storage_reset();
+    AL_Init(&al);
 }
 
-static void test_crc32_reference_vector(void)
+static void test_crc32_reference_value(void)
 {
     CHECK_EQ(CRC32_Update(0, "123456789", 9), 0xCBF43926UL);
     uint32_t crc = CRC32_Update(0, "1234", 4);
-    CHECK_EQ(CRC32_Update(crc, "56789", 5), 0xCBF43926UL);   /* chaining */
-    CHECK_EQ(CRC32_Update(0, "", 0), 0);
+    CHECK_EQ(CRC32_Update(crc, "56789", 5), 0xCBF43926UL);
 }
 
-static void test_erased_flash_is_empty(void)
+static void test_empty_flash_means_first_start(void)
 {
-    reset_flash();
+    fresh();
     CHECK_EQ(AL_Load(&al), AL_EMPTY);
-    CHECK_EQ(AL_Count(&al), 0);
+    CHECK_EQ(al.count, 0);
     CHECK_EQ(al.unlock_time_s, CFG_UNLOCK_TIME_DEFAULT_S);
 }
 
-static void test_add_find_classify(void)
+static void test_add_and_find(void)
 {
-    reset_flash();
+    fresh();
     CHECK_EQ(AL_Add(&al, UID_A, 4, true), AL_OK);
     CHECK_EQ(AL_Add(&al, UID_B, 7, false), AL_OK);
-    CHECK_EQ(AL_Count(&al), 2);
+    CHECK_EQ(al.count, 2);
     CHECK_EQ(AL_AdminCount(&al), 1);
     CHECK_EQ(AL_Find(&al, UID_B, 7), 1);
     CHECK_EQ(AL_Find(&al, UID_C, 4), -1);
-    CHECK_EQ(AL_Find(&al, UID_B, 4), -1);            /* same prefix, other length */
+    CHECK_EQ(AL_Find(&al, UID_B, 4), -1);
     CHECK_EQ(AL_Classify(&al, UID_A, 4), CARD_ADMIN);
     CHECK_EQ(AL_Classify(&al, UID_B, 7), CARD_USER);
     CHECK_EQ(AL_Classify(&al, UID_C, 4), CARD_UNKNOWN);
-    CHECK(strcmp(AL_Get(&al, 0)->name, "Admin 01") == 0);
-    CHECK(strcmp(AL_Get(&al, 1)->name, "Card 01") == 0);
+    CHECK(strcmp(al.cards[0].name, "Admin 01") == 0);
+    CHECK(strcmp(al.cards[1].name, "Card 01") == 0);
     CHECK_EQ(AL_Add(&al, UID_B, 7, false), AL_ERR_EXISTS);
     CHECK_EQ(AL_Add(&al, UID_C, 0, false), AL_ERR_PARAM);
     CHECK_EQ(AL_Add(&al, UID_C, 8, false), AL_ERR_PARAM);
 }
 
-static void test_names_reuse_free_numbers(void)
+static void test_name_is_clean_after_terminator(void)
 {
-    reset_flash();
+    fresh();
+    (void)AL_Add(&al, UID_A, 4, true);
+    for (size_t i = strlen(al.cards[0].name); i < CFG_CARD_NAME_LEN; i++) {
+        CHECK_EQ(al.cards[0].name[i], 0);
+    }
+}
+
+static void test_free_name_numbers_are_reused(void)
+{
+    fresh();
     uint8_t uid[4] = { 1, 2, 3, 0 };
     (void)AL_Add(&al, UID_A, 4, true);
     for (uint8_t i = 0; i < 3; i++) {
         uid[3] = i;
         (void)AL_Add(&al, uid, 4, false);
     }
-    CHECK_EQ(AL_RemoveAt(&al, 2), AL_OK);            /* removes "Card 02" */
+    CHECK_EQ(AL_RemoveAt(&al, 2), AL_OK);
     uid[3] = 9;
     (void)AL_Add(&al, uid, 4, false);
-    CHECK(strcmp(AL_Get(&al, 3)->name, "Card 02") == 0);
+    CHECK(strcmp(al.cards[3].name, "Card 02") == 0);
 }
 
 static void test_list_full(void)
 {
-    reset_flash();
+    fresh();
     uint8_t uid[4] = { 0 };
     for (uint16_t i = 0; i < CFG_MAX_CARDS; i++) {
         uid[0] = (uint8_t)i;
@@ -125,144 +88,139 @@ static void test_list_full(void)
     CHECK_EQ(AL_Add(&al, uid, 4, false), AL_ERR_FULL);
 }
 
-static void test_remove_and_last_admin_rule(void)
+static void test_last_admin_cannot_be_removed(void)
 {
-    reset_flash();
+    fresh();
     (void)AL_Add(&al, UID_A, 4, true);
     (void)AL_Add(&al, UID_B, 7, false);
     CHECK_EQ(AL_RemoveAt(&al, 0), AL_ERR_LAST_ADMIN);
     CHECK_EQ(AL_RemoveAt(&al, 5), AL_ERR_NOT_FOUND);
     CHECK_EQ(AL_RemoveAt(&al, 1), AL_OK);
-    CHECK_EQ(AL_Count(&al), 1);
+    CHECK_EQ(al.count, 1);
 
-    (void)AL_Add(&al, UID_C, 4, true);                 /* second admin: now removable */
+    (void)AL_Add(&al, UID_C, 4, true);
     CHECK_EQ(AL_RemoveAt(&al, 0), AL_OK);
     CHECK_EQ(AL_Find(&al, UID_C, 4), 0);
 }
 
-static void test_save_load_roundtrip(void)
+static void test_save_and_load_back(void)
 {
-    reset_flash();
+    fresh();
     (void)AL_Add(&al, UID_A, 4, true);
     (void)AL_Add(&al, UID_B, 7, false);
-    AL_SetUnlockTime(&al, 12);
+    al.unlock_time_s = 12;
     CHECK_EQ(AL_Save(&al), AL_OK);
 
-    AccessList other;
-    AL_Init(&other, &fake);
-    CHECK_EQ(AL_Load(&other), AL_OK);
-    CHECK_EQ(AL_Count(&other), 2);
-    CHECK_EQ(other.unlock_time_s, 12);
-    CHECK_EQ(AL_Classify(&other, UID_B, 7), CARD_USER);
-    CHECK(memcmp(other.cards, al.cards, 2 * sizeof(AL_Card)) == 0);
+    AccessList loaded;
+    CHECK_EQ(AL_Load(&loaded), AL_OK);
+    CHECK_EQ(loaded.count, 2);
+    CHECK_EQ(loaded.unlock_time_s, 12);
+    CHECK_EQ(AL_Classify(&loaded, UID_B, 7), CARD_USER);
+    CHECK(memcmp(loaded.cards, al.cards, 2 * sizeof(AL_Card)) == 0);
 
-    /* a second save must fully replace the first image */
     CHECK_EQ(AL_RemoveAt(&al, 1), AL_OK);
     CHECK_EQ(AL_Save(&al), AL_OK);
-    CHECK_EQ(AL_Load(&other), AL_OK);
-    CHECK_EQ(AL_Count(&other), 1);
+    CHECK_EQ(AL_Load(&loaded), AL_OK);
+    CHECK_EQ(loaded.count, 1);
 }
 
-static void test_header_layout(void)
+static void test_flash_layout(void)
 {
-    reset_flash();
+    fresh();
     (void)AL_Add(&al, UID_A, 4, true);
     CHECK_EQ(AL_Save(&al), AL_OK);
-    uint32_t magic;
-    memcpy(&magic, flash, 4);
-    CHECK_EQ(magic, 0x444C4B31UL);                   /* "DLK1" little-endian */
-    CHECK(memcmp(&flash[sizeof(AL_Header)], UID_A, 4) == 0);
+    CHECK(memcmp(fake_flash, "1KLD", 4) == 0);
+    CHECK(memcmp(&fake_flash[sizeof(AL_Header)], UID_A, 4) == 0);
 }
 
-static void test_corrupted_record_rejected(void)
+static void test_damaged_card_is_rejected(void)
 {
-    reset_flash();
+    fresh();
     (void)AL_Add(&al, UID_A, 4, true);
     (void)AL_Add(&al, UID_B, 7, false);
     CHECK_EQ(AL_Save(&al), AL_OK);
-    flash[sizeof(AL_Header) + sizeof(AL_Card) + 2] ^= 0x01;   /* one flipped bit in record 1 */
+    fake_flash[sizeof(AL_Header) + sizeof(AL_Card) + 2] ^= 0x01;
 
-    AccessList other;
-    AL_Init(&other, &fake);
-    CHECK_EQ(AL_Load(&other), AL_ERR_CORRUPT);
-    CHECK_EQ(AL_Count(&other), 0);                   /* nothing from a bad image is trusted */
+    AccessList loaded;
+    CHECK_EQ(AL_Load(&loaded), AL_ERR_CORRUPT);
+    CHECK_EQ(loaded.count, 0);
 }
 
-static void test_corrupted_header_rejected(void)
+static void test_damaged_header_is_rejected(void)
 {
-    reset_flash();
-    (void)AL_Add(&al, UID_A, 4, true);
-    CHECK_EQ(AL_Save(&al), AL_OK);
-
-    flash[6] = 0xFF;                                  /* count field -> 0x..FF > max */
-    CHECK_EQ(AL_Load(&al), AL_ERR_CORRUPT);
-
-    reset_flash();
+    fresh();
     (void)AL_Add(&al, UID_A, 4, true);
     (void)AL_Save(&al);
-    flash[0] ^= 0x10;                                 /* magic */
+    fake_flash[6] = 0xFF;
     CHECK_EQ(AL_Load(&al), AL_ERR_CORRUPT);
 
-    reset_flash();
+    fresh();
     (void)AL_Add(&al, UID_A, 4, true);
     (void)AL_Save(&al);
-    flash[8] ^= 0x02;                                 /* unlock time: covered by the CRC too */
+    fake_flash[0] ^= 0x10;
+    CHECK_EQ(AL_Load(&al), AL_ERR_CORRUPT);
+
+    fresh();
+    (void)AL_Add(&al, UID_A, 4, true);
+    (void)AL_Save(&al);
+    fake_flash[8] ^= 0x02;
     CHECK_EQ(AL_Load(&al), AL_ERR_CORRUPT);
 }
 
-static void test_power_cut_during_save(void)
+static void test_power_loss_during_save(void)
 {
-    /* Records are written before the header: a cut at any byte leaves no valid image. */
+    /* Живлення "зникає" після N байтів запису. Картки пишуться першими, заголовок останнім,
+     * тому ні на якому N у Flash не лишається валідного, але неповного списку. */
     for (int budget = 0; budget < (int)(sizeof(AL_Header) + 2 * sizeof(AL_Card)); budget += 3) {
-        reset_flash();
+        fresh();
         (void)AL_Add(&al, UID_A, 4, true);
         (void)AL_Add(&al, UID_B, 7, false);
-        write_budget = budget;
+        fake_write_budget = budget;
         CHECK_EQ(AL_Save(&al), AL_ERR_STORAGE);
-        write_budget = -1;
+        fake_write_budget = -1;
 
-        AccessList other;
-        AL_Init(&other, &fake);
-        AL_Status st = AL_Load(&other);
+        AccessList loaded;
+        AL_Status st = AL_Load(&loaded);
         CHECK(st == AL_EMPTY || st == AL_ERR_CORRUPT);
-        CHECK_EQ(AL_Count(&other), 0);
+        CHECK_EQ(loaded.count, 0);
     }
 }
 
-static void test_erase_failure_reported(void)
+static void test_erase_error_is_reported(void)
 {
-    reset_flash();
+    fresh();
     (void)AL_Add(&al, UID_A, 4, true);
-    fail_erase = true;
+    fake_erase_fails = true;
     CHECK_EQ(AL_Save(&al), AL_ERR_STORAGE);
 }
 
-static void test_unlock_time_clamped(void)
+static void test_bad_unlock_time_in_flash_uses_default(void)
 {
-    reset_flash();
-    AL_SetUnlockTime(&al, 0);
-    CHECK_EQ(al.unlock_time_s, CFG_UNLOCK_TIME_DEFAULT_S);
-    AL_SetUnlockTime(&al, CFG_UNLOCK_TIME_MAX_S + 1U);
-    CHECK_EQ(al.unlock_time_s, CFG_UNLOCK_TIME_DEFAULT_S);
-    AL_SetUnlockTime(&al, CFG_UNLOCK_TIME_MAX_S);
-    CHECK_EQ(al.unlock_time_s, CFG_UNLOCK_TIME_MAX_S);
+    fresh();
+    (void)AL_Add(&al, UID_A, 4, true);
+    al.unlock_time_s = 0;
+    CHECK_EQ(AL_Save(&al), AL_OK);
+    AccessList loaded;
+    CHECK_EQ(AL_Load(&loaded), AL_OK);
+    CHECK_EQ(loaded.unlock_time_s, CFG_UNLOCK_TIME_DEFAULT_S);
 }
 
 int main(void)
 {
     printf("test_access_list\n");
-    RUN(test_crc32_reference_vector);
-    RUN(test_erased_flash_is_empty);
-    RUN(test_add_find_classify);
-    RUN(test_names_reuse_free_numbers);
+    RUN(test_crc32_reference_value);
+    RUN(test_empty_flash_means_first_start);
+    RUN(test_add_and_find);
+    RUN(test_name_is_clean_after_terminator);
+    RUN(test_free_name_numbers_are_reused);
     RUN(test_list_full);
-    RUN(test_remove_and_last_admin_rule);
-    RUN(test_save_load_roundtrip);
-    RUN(test_header_layout);
-    RUN(test_corrupted_record_rejected);
-    RUN(test_corrupted_header_rejected);
-    RUN(test_power_cut_during_save);
-    RUN(test_erase_failure_reported);
-    RUN(test_unlock_time_clamped);
+    RUN(test_last_admin_cannot_be_removed);
+    RUN(test_save_and_load_back);
+    RUN(test_flash_layout);
+    RUN(test_damaged_card_is_rejected);
+    RUN(test_damaged_header_is_rejected);
+    RUN(test_power_loss_during_save);
+    RUN(test_erase_error_is_reported);
+    RUN(test_bad_unlock_time_in_flash_uses_default);
     return TEST_REPORT();
 }

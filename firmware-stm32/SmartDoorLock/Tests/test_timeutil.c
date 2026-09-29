@@ -21,10 +21,10 @@ static void test_roundtrip_and_weekday(void)
     CHECK_EQ(dt.hour, 12);
     CHECK_EQ(dt.minute, 34);
     CHECK_EQ(dt.second, 56);
-    CHECK_EQ(dt.weekday, 6);          /* Saturday */
+    CHECK_EQ(dt.weekday, 6);
 
     TU_FromEpoch(946684800UL, &dt);
-    CHECK_EQ(dt.weekday, 6);          /* 2000-01-01 was a Saturday */
+    CHECK_EQ(dt.weekday, 6);
 
     for (uint32_t t = 946684800UL; t < 4102444800UL; t += 7777777UL) {
         TU_FromEpoch(t, &dt);

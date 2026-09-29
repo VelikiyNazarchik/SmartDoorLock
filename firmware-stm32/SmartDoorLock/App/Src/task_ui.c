@@ -9,8 +9,6 @@
 #include "supervisor.h"
 #include "ui.h"
 
-/* tUi: sole owner of SPI2, its DMA stream and the GC9A01. Draws whatever tCtrl asks for. */
-
 static LCD_Handle s_lcd;
 
 static bool lcd_dma_wait(void)
@@ -43,9 +41,9 @@ static uint32_t measure_fill_us(bool use_dma)
     return cycles / (SystemCoreClock / 1000000U);
 }
 
-/* Full-screen fill = 240*240*2 = 115200 bytes on a 24 MHz SPI: the wire alone needs 38.4 ms.
- * Both variants are close to that; the point of DMA is that the CPU sleeps (other tasks run)
- * while the bytes go out, instead of spinning on the TXE flag. */
+/* Повний кадр = 240*240*2 = 115200 байтів; по SPI на 24 МГц це мінімум 38,4 мс.
+ * За часом DMA і звичайна передача майже однакові. Різниця в іншому: з DMA процесор
+ * у цей час вільний і виконує інші задачі, а без DMA він крутиться в циклі очікування. */
 static void benchmark(void)
 {
     dwt_start();
@@ -98,7 +96,6 @@ void TaskUi(void *arg)
         if (osMessageQueueGet(qUi, &cmd, NULL, 500) != osOK || !lcd_ok) {
             continue;
         }
-        /* Only the latest state matters: skip commands that are already outdated. */
         while (osMessageQueueGet(qUi, &cmd, NULL, 0) == osOK) {
         }
         bool dma_before = s_lcd.use_dma;

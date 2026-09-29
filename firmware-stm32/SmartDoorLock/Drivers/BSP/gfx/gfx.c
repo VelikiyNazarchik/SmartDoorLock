@@ -108,7 +108,6 @@ LCD_Status GFX_DrawLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint8_t 
     return st;
 }
 
-/* Minimal UTF-8 decoder: returns the code point and advances *s; invalid bytes become '?'. */
 static uint32_t utf8_next(const char **s)
 {
     const uint8_t *p = (const uint8_t *)*s;
@@ -146,7 +145,7 @@ static LCD_Status draw_glyph(int16_t x, int16_t y, uint32_t cp, uint8_t scale, u
     uint16_t cw = (uint16_t)GFX_CHAR_W(scale);
     uint16_t ch = (uint16_t)GFX_CHAR_H(scale);
     if (x < 0 || y < 0 || x + cw > (int16_t)LCD_WIDTH || y + ch > (int16_t)LCD_HEIGHT) {
-        return LCD_OK;   /* partially visible glyphs are skipped instead of clipped */
+        return LCD_OK;
     }
     uint16_t *p = s_buf;
     for (uint16_t py = 0; py < ch; py++) {

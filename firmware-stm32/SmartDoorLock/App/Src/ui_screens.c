@@ -5,13 +5,11 @@
 #include "menu.h"
 #include "ui.h"
 
-/* 240x240 round panel: everything is centered, text stays inside the visible circle. */
-
 #define CX            120
 #define ICON_Y        70
 #define RING_OUT      119
 #define RING_IN       111
-/* 3 visible rows keep every row inside the inner circle (r = 111) at its widest text. */
+/* 3 рядки меню: тоді навіть найдовший текст уміщається у внутрішнє коло (r = 111) */
 #define MENU_ROWS     3
 #define MENU_ROW_H    38
 #define MENU_FIRST_Y  70
@@ -23,7 +21,7 @@ static void text(int16_t y, const char *s, uint8_t scale, uint16_t fg)
     (void)GFX_DrawTextCentered(y, s, scale, fg, GFX_BLACK, 0);
 }
 
-/* Padded so a shorter new value fully covers a longer old one. */
+/* з доповненням фоном: коротше нове значення повністю закриває довше старе */
 static void text_pad(int16_t y, const char *s, uint8_t scale, uint16_t fg, uint16_t pad_w)
 {
     (void)GFX_DrawTextCentered(y, s, scale, fg, GFX_BLACK, pad_w);
@@ -35,13 +33,11 @@ static void frame(uint16_t ring)
     (void)GFX_FillRing(CX, CX, RING_OUT, RING_IN, ring);
 }
 
-/* ------------------------------------------------------------------ icons */
-
 static void icon_lock(uint16_t c, bool open)
 {
     if (open) {
         (void)GFX_FillRing(CX, ICON_Y - 12, 20, 12, c);
-        (void)GFX_FillRect(CX - 20, ICON_Y - 12, 9, 14, GFX_BLACK);   /* free left leg */
+        (void)GFX_FillRect(CX - 20, ICON_Y - 12, 9, 14, GFX_BLACK);
     } else {
         (void)GFX_FillRing(CX, ICON_Y, 20, 12, c);
     }
@@ -74,8 +70,6 @@ static void icon_card(uint16_t c)
     (void)GFX_FillRect(CX - 28, ICON_Y - 14, 56, 34, GFX_BLACK);
     (void)GFX_FillRect(CX - 22, ICON_Y - 6, 14, 12, c);
 }
-
-/* ------------------------------------------------------------------ texts */
 
 static const char *result_text(uint8_t r)
 {
@@ -114,8 +108,6 @@ static const char *event_text(uint16_t type)
     };
     return (type < LOGE_COUNT) ? names[type] : "?";
 }
-
-/* ------------------------------------------------------------------ screens */
 
 static void draw_menu_rows(const UiCommand *c)
 {
@@ -252,7 +244,7 @@ void UI_Draw(const UiCommand *c, const UiCommand *prev)
             frame(GFX_BLUE);
             icon_card(GFX_BLUE);
             text(118, "НАЛАШТУВАННЯ", 2, GFX_WHITE);
-            if (c->value != 0U) {   /* armed by the exit button */
+            if (c->value != 0U) {
                 text(146, "Прикладіть картку", 2, GFX_WHITE);
                 text(168, "адміністратора", 2, GFX_WHITE);
             } else {

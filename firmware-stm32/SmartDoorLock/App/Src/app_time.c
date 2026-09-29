@@ -3,7 +3,7 @@
 #include "app_time.h"
 #include "timeutil.h"
 
-/* Register-level RTC set-up, RM0383 sections 6.3.20 (RCC_BDCR) and 17 (RTC). */
+/* Налаштування RTC регістрами: RM0383, розділи 6.3.20 (RCC_BDCR) і 17 (RTC). */
 
 #define RTC_SYNC_TIMEOUT_MS  50U
 #define RTC_BKP_COUNT        20U
@@ -66,7 +66,6 @@ TimeSource TIME_Init(void (*wait_ms)(uint32_t ms), void (*kick)(void))
     backup_write_enable();
 
     if ((RCC->BDCR & RCC_BDCR_RTCEN) != 0U) {
-        /* Running since before this reset: keep the calendar and its clock source. */
         uint32_t sel = RCC->BDCR & RCC_BDCR_RTCSEL;
         s_source = (sel == RCC_BDCR_RTCSEL_0) ? TIME_SRC_LSE :
                    (sel == RCC_BDCR_RTCSEL_1) ? TIME_SRC_LSI : TIME_SRC_NONE;
@@ -78,7 +77,7 @@ TimeSource TIME_Init(void (*wait_ms)(uint32_t ms), void (*kick)(void))
     }
 
     if ((RCC->BDCR & RCC_BDCR_RTCSEL) != 0U) {
-        /* RTCSEL can only be changed through a backup-domain reset. */
+        /* джерело тактування RTC змінюється лише через скидання backup-домену */
         RCC->BDCR |= RCC_BDCR_BDRST;
         RCC->BDCR &= ~RCC_BDCR_BDRST;
     }
@@ -99,25 +98,25 @@ TimeSource TIME_Init(void (*wait_ms)(uint32_t ms), void (*kick)(void))
 
     uint32_t prediv_s;
     if ((RCC->BDCR & RCC_BDCR_LSERDY) != 0U) {
-        RCC->BDCR |= RCC_BDCR_RTCSEL_0;              /* 01: LSE */
+        RCC->BDCR |= RCC_BDCR_RTCSEL_0;
         s_source = TIME_SRC_LSE;
-        prediv_s = 255U;                             /* 32768 / 128 / 256 = 1 Hz */
+        prediv_s = 255U;
     } else {
         RCC->BDCR &= ~RCC_BDCR_LSEON;
         RCC->CSR |= RCC_CSR_LSION;
         (void)wait_flag(&RCC->CSR, RCC_CSR_LSIRDY);
-        RCC->BDCR |= RCC_BDCR_RTCSEL_1;              /* 10: LSI */
+        RCC->BDCR |= RCC_BDCR_RTCSEL_1;
         s_source = TIME_SRC_LSI;
-        prediv_s = 249U;                             /* ~32000 / 128 / 250 = 1 Hz */
+        prediv_s = 249U;
     }
     RCC->BDCR |= RCC_BDCR_RTCEN;
 
     rtc_unlock();
     bool ok = enter_init();
     if (ok) {
-        RTC->PRER = prediv_s;                        /* PREDIV_S must be written first */
+        RTC->PRER = prediv_s;                        /* PREDIV_S записується першим */
         RTC->PRER |= (127U << RTC_PRER_PREDIV_A_Pos);
-        RTC->CR &= ~RTC_CR_FMT;                      /* 24 h */
+        RTC->CR &= ~RTC_CR_FMT;
         RTC->ISR &= ~RTC_ISR_INIT;
         ok = wait_sync();
     }
@@ -153,7 +152,7 @@ uint32_t TIME_Now(void)
     if (!TIME_IsSet()) {
         return 0;
     }
-    uint32_t tr = RTC->TR;   /* reading TR freezes DR until DR is read */
+    uint32_t tr = RTC->TR;   /* читання TR фіксує DR, доки його не прочитають */
     uint32_t dr = RTC->DR;
     TU_DateTime dt = {
         .year = (uint16_t)(2000U + bcd2((dr >> 16) & 0xFFU)),

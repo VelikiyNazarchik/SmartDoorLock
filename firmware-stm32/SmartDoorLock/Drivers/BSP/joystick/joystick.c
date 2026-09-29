@@ -2,7 +2,7 @@
 
 #define JOY_ADC_MAX          4095U
 #define JOY_CAL_SAMPLES      16U
-#define JOY_CAL_MIN_CENTER   1000U   /* a centered stick on 3.3 V sits near 2048 */
+#define JOY_CAL_MIN_CENTER   1000U
 #define JOY_CAL_MAX_CENTER   3100U
 #define JOY_ADC_TIMEOUT_MS   2U
 

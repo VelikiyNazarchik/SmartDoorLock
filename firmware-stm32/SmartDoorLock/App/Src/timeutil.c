@@ -2,7 +2,7 @@
 #include "timeutil.h"
 
 #define SECS_PER_DAY      86400UL
-#define EPOCH_2000        946684800UL   /* 2000-01-01 00:00:00 UTC, a Saturday */
+#define EPOCH_2000        946684800UL   /* 2000-01-01 00:00:00 UTC, субота */
 
 static bool is_leap(uint16_t y)
 {
@@ -49,7 +49,7 @@ void TU_FromEpoch(uint32_t epoch, TU_DateTime *dt)
     dt->hour = (uint8_t)(rem / 3600UL);
     dt->minute = (uint8_t)((rem % 3600UL) / 60UL);
     dt->second = (uint8_t)(rem % 60UL);
-    dt->weekday = (uint8_t)(((days + 5U) % 7U) + 1U);   /* 2000-01-01 was a Saturday (6) */
+    dt->weekday = (uint8_t)(((days + 5U) % 7U) + 1U);   /* 2000-01-01 — субота (6) */
 
     uint16_t y = 2000U;
     for (;;) {

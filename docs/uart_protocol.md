@@ -24,7 +24,7 @@
 | `STATE:LOCKED` / `UNLOCKED` / `DENIED` / `LOCKOUT` / `FAULT` / `SETUP` / … | стан після кожної зміни |
 | `EVT:ACCESS_OK:<uid>` | вхід за карткою (hex UID) |
 | `EVT:ACCESS_DENIED:<uid>` | відмова |
-| `EVT:LOCKOUT` | блокування після перебору |
+| `EVT:LOCKOUT:<uid>` | блокування після перебору (UID останньої картки) |
 
 ## Правила безпеки
 
