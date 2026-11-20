@@ -1,5 +1,10 @@
 # SmartDoorLock
 
+[![CI](https://github.com/VelikiyNazarchik/SmartDoorLock/actions/workflows/ci.yml/badge.svg)](https://github.com/VelikiyNazarchik/SmartDoorLock/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+**Українською** · [English](README.en.md)
+
 **Електронний замок з доступом за RFID-картками на STM32F411 і FreeRTOS.**
 
 Прикладаєш картку — двері відчиняються. Чужа картка — відмова, а після п'яти спроб замок блокується. Адміністратор керує картками прямо на пристрої: круглий кольоровий екран і джойстик. Список карток зберігається в пам'яті мікроконтролера й не губиться після вимкнення живлення.
@@ -131,12 +136,10 @@ flowchart LR
 
 Проєкт для **STM32CubeIDE 2.x**: *File → Import → General → Existing Projects into Workspace* → папка `firmware-stm32/SmartDoorLock` → *Build* (Debug або Release). Прошивка — через ST-Link.
 
-Без GUI:
+З командного рядка, без CubeIDE (потрібен лише `arm-none-eabi-gcc`; цей самий скрипт запускає CI на кожен push):
 
 ```bash
-stm32cubeidec.exe --launcher.suppressErrors -nosplash \
-  -application org.eclipse.cdt.managedbuilder.core.headlessbuild \
-  -data <тимчасовий-workspace> -import firmware-stm32/SmartDoorLock -build SmartDoorLock/Debug
+bash firmware-stm32/SmartDoorLock/Tools/build_firmware.sh
 ```
 
 Усі налаштування — часи, пороги, тип замка, орієнтація джойстика, код відновлення — в `App/Inc/app_config.h`. Як змінити периферію і перегенерувати код з `.ioc`, не втративши свій код, — у [docs/cubemx.md](docs/cubemx.md).
@@ -144,9 +147,10 @@ stm32cubeidec.exe --launcher.suppressErrors -nosplash \
 ### Тести на ПК
 
 ```bash
-cd firmware-stm32/SmartDoorLock/Tests
-make
+make -C firmware-stm32/SmartDoorLock/Tests
 ```
+
+GitHub Actions на кожен push запускає ці тести й збирає прошивку; готові `.elf` і `.bin` лежать в артефактах збірки.
 
 5 наборів, 1278 перевірок: стан-машина (переходи, блокування, таймаути, меню, перше налаштування і відновлення адміна), список карток (CRC, пошкоджені дані, імітація збою живлення посеред запису), математика джойстика, журнал, календар.
 
@@ -184,7 +188,8 @@ firmware-stm32/SmartDoorLock/
 ├── Drivers/BSP/          драйвери пристроїв
 ├── App/Inc, App/Src      задачі FreeRTOS, стан-машина, картки, журнал, екрани, супервізор
 ├── Tests/                тести на ПК
-└── Tools/fontgen.py      генератор шрифту з українськими літерами
+└── Tools/                збірка з командного рядка, генератор шрифту з українськими літерами
+.github/workflows/ci.yml  тести і збірка прошивки на кожен push
 ```
 
 ## Обмеження
@@ -200,3 +205,7 @@ firmware-stm32/SmartDoorLock/
 - Віддалене відчинення і сповіщення через Wi-Fi-модуль (у прошивці вже виділено задачу й чергу під нього).
 - Мобільний застосунок для керування картками.
 - Підтримка брелоків 125 кГц через додатковий зчитувач.
+
+## Ліцензія
+
+MIT, див. [LICENSE](LICENSE). Бібліотеки STM32 HAL, CMSIS, USB Device Library і FreeRTOS мають власні ліцензії.
