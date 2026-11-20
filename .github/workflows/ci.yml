@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    name: Host unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run tests
+        run: make -C firmware-stm32/SmartDoorLock/Tests
+
+  firmware:
+    name: Firmware build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ARM toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
+      - name: Build firmware
+        run: bash firmware-stm32/SmartDoorLock/Tools/build_firmware.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SmartDoorLock-firmware
+          path: |
+            firmware-stm32/SmartDoorLock/build-ci/SmartDoorLock.elf
+            firmware-stm32/SmartDoorLock/build-ci/SmartDoorLock.bin
