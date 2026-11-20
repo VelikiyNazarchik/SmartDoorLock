@@ -69,6 +69,9 @@ int         AL_Find(const AccessList *al, const uint8_t *uid, uint8_t len);
 CardClass   AL_Classify(const AccessList *al, const uint8_t *uid, uint8_t len);
 AL_Status   AL_Add(AccessList *al, const uint8_t *uid, uint8_t len, bool admin);
 AL_Status   AL_RemoveAt(AccessList *al, uint16_t index);
+/* Відновлення доступу: картка стає єдиним адміном, усі інші адмін-картки видаляються
+ * (загублену картку міг знайти хтось інший). Звичайні картки лишаються. */
+AL_Status   AL_MakeSoleAdmin(AccessList *al, const uint8_t *uid, uint8_t len);
 uint16_t    AL_AdminCount(const AccessList *al);
 const char *AL_StatusStr(AL_Status st);
 

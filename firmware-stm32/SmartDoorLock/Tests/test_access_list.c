@@ -205,6 +205,27 @@ static void test_bad_unlock_time_in_flash_uses_default(void)
     CHECK_EQ(loaded.unlock_time_s, CFG_UNLOCK_TIME_DEFAULT_S);
 }
 
+static void test_make_sole_admin(void)
+{
+    static const uint8_t UID_D[4] = { 0x11, 0x22, 0x33, 0x44 };
+    fresh();
+    (void)AL_Add(&al, UID_A, 4, true);
+    (void)AL_Add(&al, UID_B, 7, false);
+    (void)AL_Add(&al, UID_D, 4, true);
+    CHECK_EQ(AL_MakeSoleAdmin(&al, UID_C, 4), AL_OK);
+    CHECK_EQ(al.count, 2);
+    CHECK_EQ(AL_AdminCount(&al), 1);
+    CHECK_EQ(AL_Classify(&al, UID_C, 4), CARD_ADMIN);
+    CHECK_EQ(AL_Classify(&al, UID_B, 7), CARD_USER);
+    CHECK_EQ(AL_Classify(&al, UID_A, 4), CARD_UNKNOWN);
+
+    CHECK_EQ(AL_MakeSoleAdmin(&al, UID_B, 7), AL_OK);   /* звичайна картка стає адміном */
+    CHECK_EQ(al.count, 1);
+    CHECK_EQ(AL_Classify(&al, UID_B, 7), CARD_ADMIN);
+    CHECK(strncmp(al.cards[0].name, "Admin 01", CFG_CARD_NAME_LEN) == 0);
+    CHECK_EQ(AL_MakeSoleAdmin(&al, UID_B, 0), AL_ERR_PARAM);
+}
+
 int main(void)
 {
     printf("test_access_list\n");
@@ -215,6 +236,7 @@ int main(void)
     RUN(test_free_name_numbers_are_reused);
     RUN(test_list_full);
     RUN(test_last_admin_cannot_be_removed);
+    RUN(test_make_sole_admin);
     RUN(test_save_and_load_back);
     RUN(test_flash_layout);
     RUN(test_damaged_card_is_rejected);

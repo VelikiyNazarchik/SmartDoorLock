@@ -24,7 +24,7 @@
 | `tSuper` | Realtime | 384 | IWDG, LED, RTC init | «Пульс» усіх задач, годує watchdog, статистика |
 | `tCtrl` | High | 640 | замок, TIM3 (зумер), Flash, RTC | Стан-машина, команди меню, журнал |
 | `tRfid` | AboveNormal | 384 | SPI1, RC522 | Опитування 10 Гц, перевірка чипа 1 Гц |
-| `tInput` | Normal | 384 | ADC1, кнопки | Джойстик 50 Гц, EXTI-кнопки з антидребезгом |
+| `tInput` | Normal | 384 | ADC1, кнопка джойстика | Джойстик 50 Гц, кнопка через EXTI з антидребезгом і довгим натисканням |
 | `tUi` | BelowNormal | 768 | SPI2 + DMA, GC9A01 | Малює екрани за командами `tCtrl` |
 | `tNet` | Low | 256 | USART1 + DMA, ESP | Заглушка до M5: тримає ESP у reset |
 | `tLog` | Low | 512 | USB CDC | Лог + консоль |
@@ -37,7 +37,7 @@
 
 ```
  tRfid ──EV_CARD/EV_RFID_*──┐
- tInput ─EV_JOY_*/EV_EXIT───┤                      ┌──> qUi ────> tUi ──> дисплей
+ tInput ─EV_JOY_*───────────┤                      ┌──> qUi ────> tUi ──> дисплей
  osTimer ─EV_TIMEOUT────────┼──> qCtrl ──> tCtrl ──┼──> qNetTx ─> tNet ─> ESP (M5)
  tLog ───EV_CONSOLE─────────┘   (стан-машина)      └──> замок, зумер, Flash (напряму)
 

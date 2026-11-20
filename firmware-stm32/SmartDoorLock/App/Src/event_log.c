@@ -46,7 +46,6 @@ const char *ELOG_TypeName(LogEventType type)
         [LOGE_ACCESS_GRANTED]   = "ACCESS_OK",
         [LOGE_ACCESS_DENIED]    = "ACCESS_DENIED",
         [LOGE_LOCKOUT]          = "LOCKOUT",
-        [LOGE_EXIT_BUTTON]      = "EXIT_BUTTON",
         [LOGE_ADMIN_LOGIN]      = "ADMIN_LOGIN",
         [LOGE_CARD_ADDED]       = "CARD_ADDED",
         [LOGE_CARD_REMOVED]     = "CARD_REMOVED",
@@ -56,6 +55,7 @@ const char *ELOG_TypeName(LogEventType type)
         [LOGE_SETTINGS_CHANGED] = "SETTINGS",
         [LOGE_STORAGE_CORRUPT]  = "STORAGE_CORRUPT",
         [LOGE_WATCHDOG_RESET]   = "WATCHDOG_RESET",
+        [LOGE_ADMIN_RECOVERY]   = "ADMIN_RECOVERY",
     };
     return (type < LOGE_COUNT) ? names[type] : "?";
 }

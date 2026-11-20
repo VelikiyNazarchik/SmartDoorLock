@@ -84,6 +84,8 @@ static const char *result_text(uint8_t r)
     case RES_LAST_ADMIN:     return "Останній адмін";
     case RES_STORAGE_ERROR:  return "Помилка Flash";
     case RES_RANDOM_UID:     return "Змінний UID";
+    case RES_ADMIN_REPLACED: return "Адміна замінено";
+    case RES_WRONG_CODE:     return "Невірний код";
     default:                 return "";
     }
 }
@@ -95,7 +97,6 @@ static const char *event_text(uint16_t type)
         [LOGE_ACCESS_GRANTED]   = "ДОЗВОЛЕНО",
         [LOGE_ACCESS_DENIED]    = "ВІДМОВА",
         [LOGE_LOCKOUT]          = "БЛОКУВАННЯ",
-        [LOGE_EXIT_BUTTON]      = "КНОПКА ВИХОДУ",
         [LOGE_ADMIN_LOGIN]      = "ВХІД АДМІНА",
         [LOGE_CARD_ADDED]       = "КАРТКУ ДОДАНО",
         [LOGE_CARD_REMOVED]     = "КАРТКУ ВИДАЛЕНО",
@@ -105,6 +106,7 @@ static const char *event_text(uint16_t type)
         [LOGE_SETTINGS_CHANGED] = "НАЛАШТУВАННЯ",
         [LOGE_STORAGE_CORRUPT]  = "FLASH ПОШКОДЖЕНО",
         [LOGE_WATCHDOG_RESET]   = "WATCHDOG",
+        [LOGE_ADMIN_RECOVERY]   = "ВІДНОВЛЕННЯ",
     };
     return (type < LOGE_COUNT) ? names[type] : "?";
 }
@@ -165,6 +167,21 @@ static void draw_lockout_dynamic(const UiCommand *c)
     text_pad(172, buf, 2, GFX_WHITE, 176);
 }
 
+/* по точці на кожен крок коду: заповнена — крок уже введено */
+static void draw_code_dynamic(const UiCommand *c)
+{
+    const int16_t step = 22;
+    int16_t x = (int16_t)(CX - (int16_t)((c->count - 1U) * step) / 2);
+    for (uint8_t i = 0; i < c->count; i++, x = (int16_t)(x + step)) {
+        (void)GFX_FillCircle(x, 112, 8, GFX_BLACK);
+        if (i < c->value) {
+            (void)GFX_FillCircle(x, 112, 7, GFX_AMBER);
+        } else {
+            (void)GFX_FillRing(x, 112, 7, 5, GFX_GREY);
+        }
+    }
+}
+
 static bool same_screen(const UiCommand *c, const UiCommand *prev)
 {
     if (prev == NULL || prev->screen != c->screen) {
@@ -173,7 +190,7 @@ static bool same_screen(const UiCommand *c, const UiCommand *prev)
     if (c->screen == SCR_RESULT_OK || c->screen == SCR_RESULT_FAIL) {
         return prev->result == c->result;
     }
-    if (c->screen == SCR_SETUP || c->screen == SCR_ENROLL) {
+    if (c->screen == SCR_ENROLL) {
         return prev->value == c->value;
     }
     return true;
@@ -244,13 +261,8 @@ void UI_Draw(const UiCommand *c, const UiCommand *prev)
             frame(GFX_BLUE);
             icon_card(GFX_BLUE);
             text(118, "НАЛАШТУВАННЯ", 2, GFX_WHITE);
-            if (c->value != 0U) {
-                text(146, "Прикладіть картку", 2, GFX_WHITE);
-                text(168, "адміністратора", 2, GFX_WHITE);
-            } else {
-                text(146, "Натисніть", 2, GFX_GREY);
-                text(168, "кнопку виходу", 2, GFX_GREY);
-            }
+            text(146, "Утримайте кнопку", 2, GFX_GREY);
+            text(168, "джойстика 3 с", 2, GFX_GREY);
         }
         break;
 
@@ -309,6 +321,27 @@ void UI_Draw(const UiCommand *c, const UiCommand *prev)
             text(126, "ГОТОВО", 3, GFX_GREEN);
             text(164, result_text(c->result), 2, GFX_WHITE);
         }
+        break;
+
+    case SCR_RECOVERY_CARD:
+        if (!same) {
+            frame(GFX_AMBER);
+            icon_card(GFX_AMBER);
+            text(118, "ВІДНОВЛЕННЯ", 2, GFX_WHITE);
+            text(146, "Прикладіть нову", 2, GFX_GREY);
+            text(168, "картку адміна", 2, GFX_GREY);
+            text(200, "< скасувати", 1, GFX_GREY);
+        }
+        break;
+
+    case SCR_RECOVERY_CODE:
+        if (!same) {
+            frame(GFX_AMBER);
+            text(60, "ВВЕДІТЬ КОД", 2, GFX_WHITE);
+            text(148, "джойстиком", 2, GFX_GREY);
+            text(184, "клік - скасувати", 1, GFX_GREY);
+        }
+        draw_code_dynamic(c);
         break;
 
     case SCR_RESULT_FAIL:

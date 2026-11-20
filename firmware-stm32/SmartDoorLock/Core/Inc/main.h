@@ -79,9 +79,6 @@ void Error_Handler(void);
 #define LCD_DC_GPIO_Port GPIOA
 #define LCD_CS_Pin GPIO_PIN_15
 #define LCD_CS_GPIO_Port GPIOA
-#define EXIT_BTN_Pin GPIO_PIN_7
-#define EXIT_BTN_GPIO_Port GPIOB
-#define EXIT_BTN_EXTI_IRQn EXTI9_5_IRQn
 #define JOY_SW_Pin GPIO_PIN_8
 #define JOY_SW_GPIO_Port GPIOB
 #define JOY_SW_EXTI_IRQn EXTI9_5_IRQn

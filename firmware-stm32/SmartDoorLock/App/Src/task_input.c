@@ -7,35 +7,22 @@
 #include "logger.h"
 #include "supervisor.h"
 
-/* tInput: власник ADC1 (джойстик) і двох кнопок. Кнопки викликають переривання EXTI;
+/* tInput: власник ADC1 (джойстик) і кнопки джойстика. Кнопка викликає переривання EXTI;
  * переривання лише ставить прапорець задачі, а антидребезг робиться тут, у задачі. */
 
 typedef struct {
-    GPIO_TypeDef *port;
-    uint16_t      pin;
-    uint32_t      flag;
-    AppEventType  event;
-    bool          pending;
-    bool          pressed;
-    uint32_t      edge_ms;
+    bool     pending;
+    bool     pressed;
+    bool     long_sent;
+    uint32_t edge_ms;
 } Button;
 
-static Button s_buttons[] = {
-    { EXIT_BTN_GPIO_Port, EXIT_BTN_Pin, FLAG_BTN_EXIT, EV_EXIT_BUTTON, false, false, 0 },
-    { JOY_SW_GPIO_Port,   JOY_SW_Pin,   FLAG_BTN_JOY,  EV_JOY_CLICK,   false, false, 0 },
-};
-#define BUTTON_COUNT (sizeof(s_buttons) / sizeof(s_buttons[0]))
-
+static Button     s_btn;
 static JOY_Handle s_joy;
 
 void HAL_GPIO_EXTI_Callback(uint16_t pin)
 {
-    if (tInputHandle == NULL) {
-        return;
-    }
-    if (pin == EXIT_BTN_Pin) {
-        (void)osThreadFlagsSet(tInputHandle, FLAG_BTN_EXIT);
-    } else if (pin == JOY_SW_Pin) {
+    if (tInputHandle != NULL && pin == JOY_SW_Pin) {
         (void)osThreadFlagsSet(tInputHandle, FLAG_BTN_JOY);
     }
 }
@@ -49,26 +36,28 @@ static void post(AppEventType type, JOY_Direction dir)
     (void)App_PostCtrl(&ev);
 }
 
-static void handle_buttons(uint32_t flags, uint32_t now)
+static void handle_button(uint32_t flags, uint32_t now)
 {
-    for (uint32_t i = 0; i < BUTTON_COUNT; i++) {
-        Button *b = &s_buttons[i];
-        bool down = (HAL_GPIO_ReadPin(b->port, b->pin) == GPIO_PIN_RESET);
+    bool down = (HAL_GPIO_ReadPin(JOY_SW_GPIO_Port, JOY_SW_Pin) == GPIO_PIN_RESET);
 
-        if ((flags & b->flag) && !b->pressed && !b->pending) {
-            b->pending = true;
-            b->edge_ms = now;
+    if ((flags & FLAG_BTN_JOY) && !s_btn.pressed && !s_btn.pending) {
+        s_btn.pending = true;
+        s_btn.edge_ms = now;
+    }
+    if (s_btn.pending && (now - s_btn.edge_ms) >= CFG_BTN_DEBOUNCE_MS) {
+        s_btn.pending = false;
+        if (down) {
+            s_btn.pressed = true;
+            s_btn.long_sent = false;
+            post(EV_JOY_CLICK, JOY_NONE);
         }
-        if (b->pending && (now - b->edge_ms) >= CFG_BTN_DEBOUNCE_MS) {
-            b->pending = false;
-            if (down) {
-                b->pressed = true;
-                post(b->event, JOY_NONE);
-            }
-        }
-        if (b->pressed && !down) {
-            b->pressed = false;
-        }
+    }
+    if (s_btn.pressed && !s_btn.long_sent && down && (now - s_btn.edge_ms) >= CFG_JOY_LONG_PRESS_MS) {
+        s_btn.long_sent = true;
+        post(EV_JOY_LONG, JOY_NONE);
+    }
+    if (s_btn.pressed && !down) {
+        s_btn.pressed = false;
     }
 }
 
@@ -96,12 +85,12 @@ void TaskInput(void *arg)
 
     for (;;) {
         SUP_Heartbeat(TASK_INPUT);
-        uint32_t flags = osThreadFlagsWait(FLAG_BTN_EXIT | FLAG_BTN_JOY, osFlagsWaitAny, CFG_INPUT_POLL_MS);
+        uint32_t flags = osThreadFlagsWait(FLAG_BTN_JOY, osFlagsWaitAny, CFG_INPUT_POLL_MS);
         if (flags & osFlagsError) {
             flags = 0;
         }
         uint32_t now = osKernelGetTickCount();
-        handle_buttons(flags, now);
+        handle_button(flags, now);
 
         JOY_Direction dir;
         if (JOY_Read(&s_joy, &dir) != JOY_OK) {

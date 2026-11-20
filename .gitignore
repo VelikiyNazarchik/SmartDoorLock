@@ -15,3 +15,7 @@ __pycache__/
 # CubeMX backups
 *.ioc.bak
 **/MXTmpFiles/
+
+# Local documents (not part of the project)
+docs/*.docx
+docs/dev_log.md

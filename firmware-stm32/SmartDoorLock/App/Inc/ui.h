@@ -20,6 +20,8 @@ typedef enum {
     SCR_SETTINGS,
     SCR_RESULT_OK,
     SCR_RESULT_FAIL,
+    SCR_RECOVERY_CARD,
+    SCR_RECOVERY_CODE,
     SCR_COUNT
 } UiScreen;
 
@@ -34,7 +36,9 @@ typedef enum {
     RES_LIST_EMPTY,
     RES_LAST_ADMIN,
     RES_STORAGE_ERROR,
-    RES_RANDOM_UID
+    RES_RANDOM_UID,
+    RES_ADMIN_REPLACED,
+    RES_WRONG_CODE
 } UiResult;
 
 typedef struct {

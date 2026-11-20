@@ -12,7 +12,7 @@ typedef enum {
     EV_RFID_OK,
     EV_JOY_DIR,
     EV_JOY_CLICK,
-    EV_EXIT_BUTTON,
+    EV_JOY_LONG,
     EV_TIMEOUT,
     EV_NET_UNLOCK,
     EV_CONSOLE

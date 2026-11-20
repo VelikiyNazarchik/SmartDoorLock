@@ -92,7 +92,8 @@ void IO_Log(LogEventType type, const uint8_t *uid, uint8_t uid_len)
     LOG_INFO("event %s %s", ELOG_TypeName(type), hex);
 
     char line[CFG_NET_LINE_LEN];
-    if (type == LOGE_ACCESS_GRANTED || type == LOGE_ACCESS_DENIED || type == LOGE_LOCKOUT) {
+    if (type == LOGE_ACCESS_GRANTED || type == LOGE_ACCESS_DENIED || type == LOGE_LOCKOUT ||
+        type == LOGE_ADMIN_RECOVERY) {
         snprintf(line, sizeof(line), "EVT:%s:%s", ELOG_TypeName(type), hex);
         send_to_net(line);
     }
@@ -145,11 +146,12 @@ void IO_Screen(void)
     case SCR_LOCKOUT:
         u.value = (uint16_t)AC_SecondsLeft(&s_ac, now_ms());
         break;
-    case SCR_SETUP:
-        u.value = AC_SetupArmed(&s_ac, now_ms()) ? 1U : 0U;
-        break;
     case SCR_ENROLL:
         u.value = s_ac.adding_admin ? 1U : 0U;
+        break;
+    case SCR_RECOVERY_CODE:
+        u.value = s_ac.code_pos;
+        u.count = CFG_RECOVERY_CODE_LEN;
         break;
     default:
         break;
@@ -237,7 +239,7 @@ static void load_cards(void)
     if (st == AL_OK) {
         LOG_INFO("cards loaded: %u (admins %u)", s_cards.count, AL_AdminCount(&s_cards));
     } else if (st == AL_EMPTY) {
-        LOG_INFO("no cards yet: setup mode (exit button, then the admin card)");
+        LOG_INFO("no cards yet: setup mode (hold the joystick button, then the card and the code)");
     } else {
         LOG_ERR("card list rejected: %s", AL_StatusStr(st));
         IO_Log(LOGE_STORAGE_CORRUPT, NULL, 0);
@@ -247,18 +249,12 @@ static void load_cards(void)
 static void refresh_timed_screens(void)
 {
     static uint32_t shown_seconds;
-    static bool shown_armed;
     uint32_t now = now_ms();
 
     if (s_ac.state == AC_LOCKOUT && AC_SecondsLeft(&s_ac, now) != shown_seconds) {
         shown_seconds = AC_SecondsLeft(&s_ac, now);
         IO_Screen();
     }
-    bool armed = AC_SetupArmed(&s_ac, now);
-    if (s_ac.state == AC_SETUP && armed != shown_armed) {
-        IO_Screen();
-    }
-    shown_armed = armed;
 }
 
 void TaskCtrl(void *arg)

@@ -10,7 +10,7 @@
  * Тому м'ютекси на шинах не потрібні і дві задачі ніколи не "б'ються" за SPI.
  *   tCtrl  - замок, зумер (TIM3), Flash зі списком карток, годинник, стан-машина
  *   tRfid  - SPI1 + RC522
- *   tInput - ADC1 (джойстик) + кнопки (EXTI)
+ *   tInput - ADC1 (джойстик) + кнопка джойстика (EXTI)
  *   tUi    - SPI2 + DMA + дисплей GC9A01
  *   tNet   - USART1 + DMA + ESP (етап M5)
  *   tLog   - USB (лог і консоль)
@@ -31,8 +31,7 @@ extern osThreadId_t tLogHandle;
 extern osThreadId_t tSuperHandle;
 
 #define FLAG_UI_DMA_DONE   0x0001U
-#define FLAG_BTN_EXIT      0x0001U
-#define FLAG_BTN_JOY       0x0002U
+#define FLAG_BTN_JOY       0x0001U
 
 typedef struct {
     char line[CFG_NET_LINE_LEN];

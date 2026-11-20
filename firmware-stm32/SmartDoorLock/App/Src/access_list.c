@@ -142,6 +142,15 @@ AL_Status AL_Add(AccessList *al, const uint8_t *uid, uint8_t len, bool admin)
     return AL_OK;
 }
 
+static void remove_at(AccessList *al, uint16_t index)
+{
+    for (uint16_t i = index; i + 1U < al->count; i++) {
+        al->cards[i] = al->cards[i + 1U];
+    }
+    al->count--;
+    memset(&al->cards[al->count], 0, sizeof(AL_Card));
+}
+
 AL_Status AL_RemoveAt(AccessList *al, uint16_t index)
 {
     if (index >= al->count) {
@@ -151,11 +160,34 @@ AL_Status AL_RemoveAt(AccessList *al, uint16_t index)
     if (is_admin && AL_AdminCount(al) == 1U) {
         return AL_ERR_LAST_ADMIN;
     }
-    for (uint16_t i = index; i + 1U < al->count; i++) {
-        al->cards[i] = al->cards[i + 1U];
+    remove_at(al, index);
+    return AL_OK;
+}
+
+AL_Status AL_MakeSoleAdmin(AccessList *al, const uint8_t *uid, uint8_t len)
+{
+    if (len == 0U || len > UID_MAX_LEN) {
+        return AL_ERR_PARAM;
     }
-    al->count--;
-    memset(&al->cards[al->count], 0, sizeof(AL_Card));
+    for (uint16_t i = al->count; i > 0U; i--) {
+        const AL_Card *c = &al->cards[i - 1U];
+        bool same = (c->uid_len == len) && (memcmp(c->uid, uid, len) == 0);
+        if ((c->flags & AL_FLAG_ADMIN) && !same) {
+            remove_at(al, (uint16_t)(i - 1U));
+        }
+    }
+    int found = AL_Find(al, uid, len);
+    if (found < 0) {
+        return AL_Add(al, uid, len, true);
+    }
+    AL_Card *c = &al->cards[found];
+    if (!(c->flags & AL_FLAG_ADMIN)) {
+        char name[CFG_CARD_NAME_LEN] = { 0 };
+        memset(c->name, 0, sizeof(c->name));
+        make_name(al, true, name);   /* окремий буфер: інакше картка «займала» б власне нове ім'я */
+        memcpy(c->name, name, sizeof(c->name));
+        c->flags |= AL_FLAG_ADMIN;
+    }
     return AL_OK;
 }
 

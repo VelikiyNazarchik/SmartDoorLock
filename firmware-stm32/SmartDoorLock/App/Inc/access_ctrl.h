@@ -22,6 +22,8 @@ typedef enum {
     AC_LOG_VIEW,
     AC_SETTINGS,
     AC_RESULT,
+    AC_RECOVERY_CARD,
+    AC_RECOVERY_CODE,
     AC_STATE_COUNT
 } AccessState;
 
@@ -37,12 +39,16 @@ typedef struct {
 
     uint32_t fail_times[CFG_LOCKOUT_ATTEMPTS];
     uint8_t  fail_count;
-    uint32_t setup_armed_until;
 
     uint8_t  menu_pos;
     uint8_t  list_pos;
     uint16_t edit_seconds;
     bool     adding_admin;
+
+    uint8_t  recovery_uid[UID_MAX_LEN];
+    uint8_t  recovery_uid_len;
+    uint8_t  code_pos;
+    bool     code_wrong;
 
     UiResult    result;
     bool        result_ok;
@@ -55,7 +61,6 @@ void        AC_HandleEvent(AccessCtx *c, const AppEvent *ev, uint32_t now);
 
 UiScreen    AC_Screen(const AccessCtx *c);
 uint32_t    AC_SecondsLeft(const AccessCtx *c, uint32_t now);
-bool        AC_SetupArmed(const AccessCtx *c, uint32_t now);
 const char *AC_StateName(AccessState s);
 
 #endif

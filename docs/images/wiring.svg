@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 900 600">
+  <style>
+    .t  { font: 600 17px "Segoe UI", Helvetica, Arial, sans-serif; fill: #1f2937; }
+    .s  { font: 13px "Segoe UI", Helvetica, Arial, sans-serif; fill: #6b7280; }
+    .l  { font: 14px "Segoe UI", Helvetica, Arial, sans-serif; fill: #1f2937; }
+    .a  { font: 14px "Segoe UI", Helvetica, Arial, sans-serif; fill: #9ca3af; }
+    .p  { font: 700 14px Consolas, Menlo, monospace; fill: #1d4ed8; text-anchor: end; }
+    .pw { font: 700 14px Consolas, Menlo, monospace; fill: #b91c1c; text-anchor: end; }
+    .g  { font: 700 14px Consolas, Menlo, monospace; fill: #374151; text-anchor: end; }
+    .box  { fill: #ffffff; stroke: #9ca3af; stroke-width: 1.5; }
+    .mcu  { fill: #111827; stroke: #111827; }
+    .wire { fill: none; stroke: #6b7280; stroke-width: 2; }
+  </style>
+  <rect width="900" height="600" fill="#f8fafc"/>
+
+  <!-- лінії до плати -->
+  <path class="wire" d="M280,140 H312 V210 H345"/>
+  <path class="wire" d="M280,410 H312 V370 H345"/>
+  <path class="wire" d="M620,116 H588 V210 H555"/>
+  <path class="wire" d="M620,281 H555"/>
+  <path class="wire" d="M620,470 H588 V370 H555"/>
+
+  <!-- STM32 -->
+  <rect class="mcu" x="345" y="150" width="210" height="300" rx="10"/>
+  <text x="450" y="270" text-anchor="middle" style="font:700 20px 'Segoe UI',Helvetica,Arial,sans-serif;fill:#fff">STM32F411</text>
+  <text x="450" y="295" text-anchor="middle" style="font:15px 'Segoe UI',Helvetica,Arial,sans-serif;fill:#d1d5db">Black Pill</text>
+  <text x="450" y="340" text-anchor="middle" style="font:13px 'Segoe UI',Helvetica,Arial,sans-serif;fill:#9ca3af">USB-C 5 В: живлення</text>
+  <text x="450" y="358" text-anchor="middle" style="font:13px 'Segoe UI',Helvetica,Arial,sans-serif;fill:#9ca3af">і сервісна консоль</text>
+  <text x="450" y="384" text-anchor="middle" style="font:13px 'Segoe UI',Helvetica,Arial,sans-serif;fill:#9ca3af">SWD: прошивка</text>
+
+  <!-- RC522 -->
+  <rect class="box" x="20" y="20" width="260" height="250" rx="8"/>
+  <text class="t" x="36" y="46">RFID RC522</text>
+  <text class="s" x="264" y="46" text-anchor="end">SPI1</text>
+  <text class="l" x="36" y="78">SDA (SS)</text><text class="a" x="150" y="78">→</text><text class="p" x="264" y="78">PA1</text>
+  <text class="l" x="36" y="104">SCK</text><text class="a" x="150" y="104">→</text><text class="p" x="264" y="104">PA5</text>
+  <text class="l" x="36" y="130">MOSI</text><text class="a" x="150" y="130">→</text><text class="p" x="264" y="130">PA7</text>
+  <text class="l" x="36" y="156">MISO</text><text class="a" x="150" y="156">→</text><text class="p" x="264" y="156">PA6</text>
+  <text class="l" x="36" y="182">RST</text><text class="a" x="150" y="182">→</text><text class="p" x="264" y="182">PA4</text>
+  <text class="l" x="36" y="208">3.3V</text><text class="a" x="150" y="208">→</text><text class="pw" x="264" y="208">3V3</text>
+  <text class="l" x="36" y="234">GND</text><text class="a" x="150" y="234">→</text><text class="g" x="264" y="234">GND</text>
+  <text class="s" x="36" y="258">IRQ не підключається</text>
+
+  <!-- GC9A01 -->
+  <rect class="box" x="20" y="290" width="260" height="240" rx="8"/>
+  <text class="t" x="36" y="316">Дисплей GC9A01</text>
+  <text class="s" x="264" y="316" text-anchor="end">SPI2 + DMA</text>
+  <text class="l" x="36" y="348">SCL</text><text class="a" x="150" y="348">→</text><text class="p" x="264" y="348">PB10</text>
+  <text class="l" x="36" y="374">SDA</text><text class="a" x="150" y="374">→</text><text class="p" x="264" y="374">PB15</text>
+  <text class="l" x="36" y="400">DC</text><text class="a" x="150" y="400">→</text><text class="p" x="264" y="400">PA8</text>
+  <text class="l" x="36" y="426">CS</text><text class="a" x="150" y="426">→</text><text class="p" x="264" y="426">PA15</text>
+  <text class="l" x="36" y="452">RST</text><text class="a" x="150" y="452">→</text><text class="p" x="264" y="452">PB12</text>
+  <text class="l" x="36" y="478">VCC</text><text class="a" x="150" y="478">→</text><text class="pw" x="264" y="478">3V3</text>
+  <text class="l" x="36" y="504">GND</text><text class="a" x="150" y="504">→</text><text class="g" x="264" y="504">GND</text>
+
+  <!-- Джойстик -->
+  <rect class="box" x="620" y="20" width="260" height="192" rx="8"/>
+  <text class="t" x="636" y="46">Джойстик</text>
+  <text class="s" x="864" y="46" text-anchor="end">ADC1 + EXTI</text>
+  <text class="l" x="636" y="78">VRx</text><text class="a" x="750" y="78">→</text><text class="p" x="864" y="78">PA0</text>
+  <text class="l" x="636" y="104">VRy</text><text class="a" x="750" y="104">→</text><text class="p" x="864" y="104">PA3</text>
+  <text class="l" x="636" y="130">SW</text><text class="a" x="750" y="130">→</text><text class="p" x="864" y="130">PB8</text>
+  <text class="l" x="636" y="156">+5V</text><text class="a" x="750" y="156">→</text><text class="pw" x="864" y="156">3V3</text>
+  <text class="l" x="636" y="182">GND</text><text class="a" x="750" y="182">→</text><text class="g" x="864" y="182">GND</text>
+
+  <!-- Зумер -->
+  <rect class="box" x="620" y="230" width="260" height="102" rx="8"/>
+  <text class="t" x="636" y="256">П'єзо-зумер</text>
+  <text class="s" x="864" y="256" text-anchor="end">TIM3 PWM</text>
+  <text class="l" x="636" y="288">(+)</text><text class="a" x="750" y="288">→</text><text class="p" x="864" y="288">PB4</text>
+  <text class="l" x="636" y="314">(−)</text><text class="a" x="750" y="314">→</text><text class="g" x="864" y="314">GND</text>
+
+  <!-- MOSFET-модуль і замок -->
+  <rect class="box" x="620" y="350" width="260" height="230" rx="8"/>
+  <text class="t" x="636" y="376">MOSFET-модуль</text>
+  <text class="s" x="864" y="376" text-anchor="end">замок 12 В</text>
+  <text class="l" x="636" y="408">PWM</text><text class="a" x="750" y="408">→</text><text class="p" x="864" y="408">PB13</text>
+  <text class="l" x="636" y="434">GND (зел.)</text><text class="a" x="750" y="434">→</text><text class="g" x="864" y="434">GND</text>
+  <text class="l" x="636" y="460">+</text><text class="a" x="750" y="460">→</text><text class="pw" x="864" y="460">+12 В</text>
+  <text class="l" x="636" y="486">−</text><text class="a" x="750" y="486">→</text><text class="g" x="864" y="486">GND 12 В</text>
+  <text class="l" x="636" y="512">LOAD</text><text class="a" x="750" y="512">→</text><text class="g" x="864" y="512">(−) замка</text>
+  <text class="l" x="636" y="538">(+) замка</text><text class="a" x="750" y="538">→</text><text class="pw" x="864" y="538">+12 В</text>
+  <text class="s" x="636" y="564">діод 1N4007 на замку, катод до +12 В</text>
+</svg>

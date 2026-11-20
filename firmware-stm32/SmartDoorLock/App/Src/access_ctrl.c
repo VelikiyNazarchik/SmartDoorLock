@@ -21,6 +21,8 @@ static uint32_t state_duration_ms(const AccessCtx *c, AccessState s)
     case AC_DENIED:           return CFG_DENIED_SHOW_MS;
     case AC_LOCKOUT:          return CFG_LOCKOUT_TIME_MS;
     case AC_ENROLL_WAIT_CARD: return CFG_ENROLL_WAIT_MS;
+    case AC_RECOVERY_CARD:
+    case AC_RECOVERY_CODE:    return CFG_RECOVERY_WAIT_MS;
     case AC_RESULT:           return CFG_RESULT_SHOW_MS;
     case AC_ADMIN_MENU:
     case AC_DELETE_SELECT:
@@ -200,23 +202,6 @@ static void on_card_at_door(AccessCtx *c, const AppEvent *ev, uint32_t now)
     }
 }
 
-/* Режим налаштування: без адміна будь-хто ззовні міг би стати адміном, тому картку приймаємо
- * лише протягом 60 с після кнопки виходу — а вона всередині приміщення. */
-static void on_card_in_setup(AccessCtx *c, const AppEvent *ev, uint32_t now)
-{
-    if (!AC_SetupArmed(c, now)) {
-        IO_Sound(BUZZ_DENIED);
-        IO_Log(LOGE_ACCESS_DENIED, ev->uid, ev->uid_len);
-        return;
-    }
-    UiResult r = add_card(c, ev, true);
-    bool ok = (r == RES_ADMIN_ADDED);
-    if (ok) {
-        c->setup_armed_until = 0;
-    }
-    show_result(c, ok, r, base_state(c), now);
-}
-
 static void on_menu(AccessCtx *c, const AppEvent *ev, uint32_t now)
 {
     if (is_up_down(ev)) {
@@ -319,14 +304,89 @@ static void on_settings(AccessCtx *c, const AppEvent *ev, uint32_t now)
     }
 }
 
-static void on_exit_button(AccessCtx *c, uint32_t now)
+/* Перший адмін або відновлення: утримання кнопки джойстика -> нова картка -> код джойстиком. */
+static void start_recovery(AccessCtx *c, uint32_t now)
 {
-    if (AL_AdminCount(c->cards) == 0U) {
-        c->setup_armed_until = now + CFG_SETUP_ARM_MS;
+    IO_Sound(BUZZ_CLICK);
+    go_to(c, AC_RECOVERY_CARD, now);
+}
+
+static void on_recovery_card(AccessCtx *c, const AppEvent *ev, uint32_t now)
+{
+    if (ev->type == EV_CARD) {
+        if (uid_is_random(ev)) {
+            show_result(c, false, RES_RANDOM_UID, base_state(c), now);
+            return;
+        }
+        memcpy(c->recovery_uid, ev->uid, ev->uid_len);
+        c->recovery_uid_len = ev->uid_len;
+        c->code_pos = 0;
+        c->code_wrong = false;
+        IO_Sound(BUZZ_CLICK);
+        go_to(c, AC_RECOVERY_CODE, now);
+    } else if (is_back(ev) || ev->type == EV_JOY_CLICK) {
+        go_to(c, base_state(c), now);
     }
-    IO_Sound(BUZZ_OK);
-    IO_Log(LOGE_EXIT_BUTTON, NULL, 0);
-    go_to(c, AC_UNLOCKED, now);   /* безпека понад усе: кнопка виходу відчиняє завжди */
+}
+
+static void finish_recovery(AccessCtx *c, uint32_t now)
+{
+    const uint8_t *uid = c->recovery_uid;
+    uint8_t len = c->recovery_uid_len;
+
+    if (c->code_wrong) {
+        /* невірний код рахується як невдала спроба: 5 за хвилину -> блокування */
+        if (add_failure(c, now)) {
+            c->fail_count = 0;
+            IO_Sound(BUZZ_LOCKOUT);
+            IO_Log(LOGE_LOCKOUT, uid, len);
+            go_to(c, AC_LOCKOUT, now);
+        } else {
+            IO_Log(LOGE_ACCESS_DENIED, uid, len);
+            show_result(c, false, RES_WRONG_CODE, base_state(c), now);
+        }
+        return;
+    }
+
+    c->undo = *c->cards;
+    AL_Status st = AL_MakeSoleAdmin(c->cards, uid, len);
+    if (st != AL_OK) {
+        *c->cards = c->undo;
+        show_result(c, false, result_for(st), base_state(c), now);
+        return;
+    }
+    if (!save_or_undo(c)) {
+        show_result(c, false, RES_STORAGE_ERROR, base_state(c), now);
+        return;
+    }
+    c->fail_count = 0;
+    IO_Log(LOGE_ADMIN_RECOVERY, uid, len);
+    bool first_admin = (AL_AdminCount(&c->undo) == 0U);
+    show_result(c, true, first_admin ? RES_ADMIN_ADDED : RES_ADMIN_REPLACED, base_state(c), now);
+}
+
+static void on_recovery_code(AccessCtx *c, const AppEvent *ev, uint32_t now)
+{
+    static const JOY_Direction code[CFG_RECOVERY_CODE_LEN] = CFG_RECOVERY_CODE;
+
+    if (ev->type == EV_JOY_CLICK) {
+        go_to(c, base_state(c), now);
+        return;
+    }
+    if (ev->type != EV_JOY_DIR || ev->dir == JOY_NONE) {
+        return;
+    }
+    /* Помилку не показуємо одразу: інакше код підбирався б по одному кроку. */
+    if (ev->dir != code[c->code_pos]) {
+        c->code_wrong = true;
+    }
+    c->code_pos++;
+    IO_Sound(BUZZ_CLICK);
+    if (c->code_pos == CFG_RECOVERY_CODE_LEN) {
+        finish_recovery(c, now);
+    } else {
+        go_to(c, c->state, now);
+    }
 }
 
 static void on_timeout(AccessCtx *c, uint32_t now)
@@ -410,7 +470,6 @@ void AC_Start(AccessCtx *c, uint32_t now)
 void AC_HandleEvent(AccessCtx *c, const AppEvent *ev, uint32_t now)
 {
     switch (ev->type) {
-    case EV_EXIT_BUTTON: on_exit_button(c, now); return;
     case EV_TIMEOUT:     on_timeout(c, now); return;
     case EV_RFID_FAULT:  on_reader_fault(c, now); return;
     case EV_RFID_OK:     on_reader_ok(c, now); return;
@@ -425,6 +484,8 @@ void AC_HandleEvent(AccessCtx *c, const AppEvent *ev, uint32_t now)
     case AC_FAULT:
         if (ev->type == EV_CARD) {
             on_card_at_door(c, ev, now);
+        } else if (ev->type == EV_JOY_LONG && (c->state == AC_LOCKED || c->state == AC_DENIED)) {
+            start_recovery(c, now);
         }
         break;
     case AC_LOCKOUT:
@@ -434,8 +495,13 @@ void AC_HandleEvent(AccessCtx *c, const AppEvent *ev, uint32_t now)
         }
         break;
     case AC_SETUP:
+        /* Без адміна будь-хто міг би стати адміном, тому перший адмін додається
+         * так само, як при відновленні: утримання джойстика, картка і код. */
         if (ev->type == EV_CARD) {
-            on_card_in_setup(c, ev, now);
+            IO_Sound(BUZZ_DENIED);
+            IO_Log(LOGE_ACCESS_DENIED, ev->uid, ev->uid_len);
+        } else if (ev->type == EV_JOY_LONG) {
+            start_recovery(c, now);
         }
         break;
     case AC_ADMIN_MENU:       on_menu(c, ev, now); break;
@@ -448,6 +514,8 @@ void AC_HandleEvent(AccessCtx *c, const AppEvent *ev, uint32_t now)
             go_to(c, c->after_result, now);
         }
         break;
+    case AC_RECOVERY_CARD:    on_recovery_card(c, ev, now); break;
+    case AC_RECOVERY_CODE:    on_recovery_code(c, ev, now); break;
     default:
         break;
     }
@@ -468,6 +536,8 @@ UiScreen AC_Screen(const AccessCtx *c)
     case AC_LOG_VIEW:         return SCR_LOG;
     case AC_SETTINGS:         return SCR_SETTINGS;
     case AC_RESULT:           return c->result_ok ? SCR_RESULT_OK : SCR_RESULT_FAIL;
+    case AC_RECOVERY_CARD:    return SCR_RECOVERY_CARD;
+    case AC_RECOVERY_CODE:    return SCR_RECOVERY_CODE;
     default:                  return SCR_LOCKED;
     }
 }
@@ -481,16 +551,12 @@ uint32_t AC_SecondsLeft(const AccessCtx *c, uint32_t now)
     return (left_ms <= 0) ? 0U : ((uint32_t)left_ms + 999U) / 1000U;
 }
 
-bool AC_SetupArmed(const AccessCtx *c, uint32_t now)
-{
-    return c->setup_armed_until != 0U && (int32_t)(now - c->setup_armed_until) < 0;
-}
-
 const char *AC_StateName(AccessState s)
 {
     static const char *const names[AC_STATE_COUNT] = {
         "LOCKED", "UNLOCKED", "DENIED", "LOCKOUT", "SETUP", "FAULT",
         "ADMIN_MENU", "ENROLL", "DELETE", "LOG_VIEW", "SETTINGS", "RESULT",
+        "RECOVERY_CARD", "RECOVERY_CODE",
     };
     return (s < AC_STATE_COUNT) ? names[s] : "?";
 }

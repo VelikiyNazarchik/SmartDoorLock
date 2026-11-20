@@ -13,7 +13,6 @@
 #define CFG_LOCKOUT_TIME_MS        60000U
 #define CFG_MENU_IDLE_MS           30000U
 #define CFG_ENROLL_WAIT_MS         15000U
-#define CFG_SETUP_ARM_MS           60000U   /* скільки після кнопки виходу налаштування приймає адмін-картку */
 #define CFG_TIMER_SLACK_MS         20U      /* подія таймера, що прийшла настільки раніше дедлайну, — запізніла */
 
 #define CFG_MAX_CARDS              64U
@@ -37,13 +36,21 @@
 #define CFG_JOY_DEAD_ZONE_PCT      15U
 #define CFG_JOY_PRESS_PCT          60U
 #define CFG_JOY_RELEASE_PCT        35U
-/* На прототипі вісь X модуля стоїть вертикально. Спершу осі міняються місцями,
+/* Орієнтація джойстика в корпусі. Спершу осі міняються місцями,
  * потім застосовуються інверсії. Не той напрямок на пристрої — змінити один прапорець. */
-#define CFG_JOY_SWAP_XY            1
-#define CFG_JOY_INVERT_X           0
+#define CFG_JOY_SWAP_XY            0
+#define CFG_JOY_INVERT_X           1
 #define CFG_JOY_INVERT_Y           0
 
-#define CFG_LOCK_ENERGIZE_TO_OPEN  1        /* 1: соленоїд/клямка (струм відчиняє), 0: електромагніт (струм тримає) */
+#define CFG_JOY_LONG_PRESS_MS      3000U    /* утримання кнопки джойстика запускає відновлення адміна */
+#define CFG_RECOVERY_WAIT_MS       15000U
+/* Код відновлення адміна після прикладання нової картки. Перевіряється лише після всіх кроків,
+ * щоб його не можна було підбирати по одному кроку. Код з репозиторію знає кожен, хто його
+ * прочитав, тож на реальному пристрої його треба змінити. */
+#define CFG_RECOVERY_CODE          { JOY_UP, JOY_UP, JOY_DOWN, JOY_DOWN, JOY_LEFT, JOY_RIGHT, JOY_LEFT, JOY_RIGHT }
+#define CFG_RECOVERY_CODE_LEN      8U
+
+#define CFG_LOCK_ENERGIZE_TO_OPEN  0        /* 1: соленоїд/клямка (струм відчиняє), 0: електромагніт (струм тримає) */
 
 #define CFG_BUZZER_TICK_HZ         1000000UL
 #define CFG_BEEP_CLICK_HZ          4000U
